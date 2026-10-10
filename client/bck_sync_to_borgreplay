@@ -5,10 +5,27 @@
 # bck_sync_to_borgreplay - copies the Borg repositories to borgreplay and
 # writes the .last_sync marker
 #
-# REPLICA_HOST, REPLICA_USER and SSH_KEY are read from /etc/borgreplay.env
+# REPLICA_HOST, REPLICA_USER, SSH_KEY and STAY_AWAKE_REQUEST are read from
+# /etc/borgreplay.env
+#
+# Usage: bck_sync_to_borgreplay [--stay-awake]
+#   --stay-awake   asks borgreplay to create /etc/borgreplay-stay-awake once
+#                  the replica is done, so it does not suspend until the file
+#                  is removed by hand (e.g. after a remote login)
+#
+# The same request is made by the nightly cron run when $STAY_AWAKE_REQUEST
+# exists; the file is deleted once the request has been delivered.
 
 SSH_KEY=~/.ssh/id_ed25519_borgreplay
+STAY_AWAKE=""
+case "$1" in
+    --stay-awake) STAY_AWAKE=" stay-awake" ;;
+    "") ;;
+    *)  echo "usage: bck_sync_to_borgreplay [--stay-awake]" >&2; exit 2 ;;
+esac
+STAY_AWAKE_REQUEST=/etc/borgreplay-stay-awake.request
 [ -r /etc/borgreplay.env ] && . /etc/borgreplay.env
+[ -e "$STAY_AWAKE_REQUEST" ] && STAY_AWAKE=" stay-awake"
 
 if [ -z "$REPLICA_HOST" ] || [ -z "$REPLICA_USER" ]; then
     logger -t bck_sync_to_borgreplay "REPLICA_HOST or REPLICA_USER not set in /etc/borgreplay.env"
@@ -29,4 +46,14 @@ if [ $RC -ne 0 ]; then
     logger -t bck_sync_to_borgreplay "rsync failed (code $RC), marker not updated"
     exit $RC
 fi
-ssh $KEY $DEST "echo $START_DATETIME > /backup/borgrepo/.last_sync"
+# The second word of the marker, if present, is a request for borgreplay-cycle
+ssh $KEY $DEST "echo $START_DATETIME$STAY_AWAKE > /backup/borgrepo/.last_sync"
+RC=$?
+if [ $RC -ne 0 ]; then
+    logger -t bck_sync_to_borgreplay "marker write failed (code $RC)"
+    exit $RC
+fi
+if [ -n "$STAY_AWAKE" ]; then
+    rm -f "$STAY_AWAKE_REQUEST"
+    logger -t bck_sync_to_borgreplay "stay-awake request delivered"
+fi

@@ -13,6 +13,8 @@
 #
 # To keep it awake:        touch /etc/borgreplay-stay-awake
 # To let it sleep again:   rm /etc/borgreplay-stay-awake
+# The file is also created when the marker written by the client contains
+# "stay-awake" (bck_sync_to_borgreplay --stay-awake)
 #
 # Settings can be overridden in /etc/borgreplay-cycle.conf
 
@@ -59,6 +61,18 @@ wait_sync() {
         sleep "$POLL"
     done
     return 1
+}
+
+# If the client asked for it in the marker, creates $STAY_AWAKE with a note
+stay_awake_request() {
+    grep -qw stay-awake "$SYNC_MARKER" 2>/dev/null || return 0
+    [ -e "$STAY_AWAKE" ] && return 0
+    {
+        echo "Created by borgreplay-cycle on $(date '+%Y-%m-%d %H:%M:%S'):"
+        echo "the replica $(cut -d' ' -f1 "$SYNC_MARKER") asked to stay awake."
+        echo "Remove this file after the remote login to let the machine suspend."
+    } > "$STAY_AWAKE"
+    log "stay-awake requested by the replica, $STAY_AWAKE created"
 }
 
 pool_busy() {
@@ -135,6 +149,7 @@ while :; do
 
     if wait_sync "$start"; then
         log "replica completed"
+        stay_awake_request
     else
         log "no replica within $SYNC_WAIT_MIN minutes"
     fi

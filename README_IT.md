@@ -55,6 +55,25 @@ Lo script, lanciato da root:
 3. scrive l'ora di inizio in `/backup/borgrepo/.last_sync`. Su `borgreplay` e'
    questo a far capire a `borgreplay-cycle` che la replica e' finita.
 
+Con `--stay-awake` il marker diventa `YYYYMMDD_HHMMSS stay-awake`: a replica
+finita `borgreplay-cycle` crea `/etc/borgreplay-stay-awake` (con una nota
+dentro) e la macchina resta accesa finche' non lo cancelli dopo l'accesso
+remoto:
+
+```sh
+sudo bck_sync_to_borgreplay --stay-awake    # sull'host Borg
+sudo rm /etc/borgreplay-stay-awake          # su borgreplay, a fine lavoro
+```
+
+Lanciare lo script a mano funziona solo mentre `borgreplay` e' sveglia. Per
+chiederlo con la replica notturna del cron si crea invece il file di richiesta
+sull'host Borg (`STAY_AWAKE_REQUEST` in `.env`); viene cancellato appena il
+marker e' stato scritto:
+
+```sh
+sudo touch /etc/borgreplay-stay-awake.request   # sull'host Borg
+```
+
 Lo lancia ogni giorno alle 04:50 il crontab di root sull'host Borg:
 
 ```
