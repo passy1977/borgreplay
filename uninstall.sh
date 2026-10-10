@@ -1,15 +1,15 @@
 #!/bin/sh
 #
-# uninstall.sh - rimuove borgreplay-cycle e borgreplay-check
+# uninstall.sh - removes borgreplay-cycle and borgreplay-check
 #
-# Uso (come root):   ./uninstall.sh
+# Usage (as root):   ./uninstall.sh
 #
-# Lascia al loro posto /etc/borgreplay-cycle.conf e lo stato in /var/lib/borgreplay-check.
+# Leaves /etc/borgreplay-cycle.conf and the state in /var/lib/borgreplay-check in place.
 
 set -e
 
 if [ "$(id -u)" -ne 0 ]; then
-    echo "uninstall.sh: va eseguito come root" >&2
+    echo "uninstall.sh: must be run as root" >&2
     exit 2
 fi
 
@@ -22,4 +22,4 @@ rm -rf /etc/sv/borgreplay-cycle
 rm -f /etc/cron.d/borgreplay-check
 rm -f /usr/local/bin/borgreplay-cycle /usr/local/bin/borgreplay-check
 
-echo "rimosso; la macchina non andra' piu' in sospensione"
+echo "removed; the machine will no longer suspend"

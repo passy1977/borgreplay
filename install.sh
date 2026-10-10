@@ -1,15 +1,15 @@
 #!/bin/sh
 #
-# install.sh - installa borgreplay-cycle e borgreplay-check (Void Linux, runit)
+# install.sh - installs borgreplay-cycle and borgreplay-check (Void Linux, runit)
 #
-# Uso (come root):   ./install.sh
+# Usage (as root):   ./install.sh
 #
-# La configurazione esistente in /etc/borgreplay-cycle.conf non viene sovrascritta.
+# An existing /etc/borgreplay-cycle.conf is not overwritten.
 
 set -e
 
 if [ "$(id -u)" -ne 0 ]; then
-    echo "install.sh: va eseguito come root" >&2
+    echo "install.sh: must be run as root" >&2
     exit 2
 fi
 
@@ -26,13 +26,13 @@ install -m 644 cron.d/borgreplay-check /etc/cron.d/borgreplay-check
 if [ ! -e /etc/borgreplay-cycle.conf ]; then
     install -m 644 etc/borgreplay-cycle.conf /etc/borgreplay-cycle.conf
 else
-    echo "lascio invariato /etc/borgreplay-cycle.conf"
+    echo "leaving /etc/borgreplay-cycle.conf unchanged"
 fi
 
 if [ ! -e /var/service/borgreplay-cycle ]; then
     ln -s /etc/sv/borgreplay-cycle /var/service/
-    echo "servizio borgreplay-cycle abilitato"
+    echo "borgreplay-cycle service enabled"
 else
     sv restart borgreplay-cycle
-    echo "servizio borgreplay-cycle riavviato"
+    echo "borgreplay-cycle service restarted"
 fi

@@ -1,31 +1,31 @@
 #!/bin/sh
 #
-# borgreplay-cycle - ciclo giornaliero veglia / replica / controllo / sospensione
+# borgreplay-cycle - daily wake / replica / check / suspend cycle
 #
-# Gira come servizio runit. A ogni risveglio (o avvio):
-#   1. aspetta che borg completi la replica (marker aggiornato) o un tempo massimo
-#   2. se e' ora, lancia lo scrub del pool e ne attende la fine
-#   3. esegue borgreplay-check (rapporto completo un giorno a settimana)
-#   4. aspetta che la macchina sia libera (nessun utente collegato, nessun rsync)
-#   5. sospende in RAM fino alla prossima sveglia
+# Runs as a runit service. On every wake-up (or boot):
+#   1. waits for borg to complete the replica (marker updated) or a timeout
+#   2. if due, starts the pool scrub and waits for it to finish
+#   3. runs borgreplay-check (full report one day a week)
+#   4. waits for the machine to be idle (no logged-in users, no rsync)
+#   5. suspends to RAM until the next wake-up
 #
-# Per tenerla sveglia:   touch /etc/borgreplay-stay-awake
-# Per farla riaddormentare: rm /etc/borgreplay-stay-awake
+# To keep it awake:        touch /etc/borgreplay-stay-awake
+# To let it sleep again:   rm /etc/borgreplay-stay-awake
 #
-# Le impostazioni si possono cambiare in /etc/borgreplay-cycle.conf
+# Settings can be overridden in /etc/borgreplay-cycle.conf
 
-# ---------------------------------------------------------------- configurazione
+# ---------------------------------------------------------------- configuration
 
-WAKE_TIME="02:00"                           # ora locale della sveglia quotidiana
-POOL="backup"                               # pool ZFS
-SYNC_MARKER="/backup/borgrepo/.last_sync"   # file toccato da borg a fine replica
-SYNC_WAIT_MIN=180                           # attesa massima della replica (minuti)
-SCRUB_EVERY_DAYS=30                         # intervallo tra due scrub
-REPORT_DOW=1                                # giorno del rapporto completo (1 = lunedi')
-STAY_AWAKE="/etc/borgreplay-stay-awake"     # se esiste, niente sospensione
+WAKE_TIME="02:00"                           # local time of the daily wake-up
+POOL="backup"                               # ZFS pool
+SYNC_MARKER="/backup/borgrepo/.last_sync"   # file touched by borg when the replica ends
+SYNC_WAIT_MIN=180                           # maximum wait for the replica (minutes)
+SCRUB_EVERY_DAYS=30                         # interval between two scrubs
+REPORT_DOW=1                                # day of the full report (1 = Monday)
+STAY_AWAKE="/etc/borgreplay-stay-awake"     # if present, no suspend
 CHECK="/usr/local/bin/borgreplay-check"
-POLL=60                                     # intervallo dei controlli (secondi)
-SETTLE=30                                   # attesa dopo il risveglio (rete, tunnel)
+POLL=60                                     # polling interval (seconds)
+SETTLE=30                                   # wait after wake-up (network, tunnel)
 
 [ -r /etc/borgreplay-cycle.conf ] && . /etc/borgreplay-cycle.conf
 
@@ -48,7 +48,7 @@ marker_ts() {
     stat -c %Y "$SYNC_MARKER" 2>/dev/null || echo 0
 }
 
-# Attende che il marker sia piu' recente dell'istante $1
+# Waits for the marker to be newer than time $1
 wait_sync() {
     since="$1"
     deadline=$(( since + SYNC_WAIT_MIN * 60 ))
@@ -71,16 +71,16 @@ scrub_due() {
     [ $(( ($(now) - ts) / 86400 )) -ge "$SCRUB_EVERY_DAYS" ]
 }
 
-# Stampa il motivo per cui la macchina non puo' sospendersi; vuoto = libera
+# Prints why the machine cannot suspend; empty = idle
 busy_reason() {
     if [ -e "$STAY_AWAKE" ]; then
-        echo "presente $STAY_AWAKE"
+        echo "$STAY_AWAKE present"
     elif [ -n "$(who 2>/dev/null)" ]; then
-        echo "utenti collegati"
+        echo "users logged in"
     elif pgrep -x rsync >/dev/null 2>&1; then
-        echo "rsync in corso"
+        echo "rsync running"
     elif pool_busy; then
-        echo "scrub o resilver in corso"
+        echo "scrub or resilver in progress"
     fi
 }
 
@@ -90,14 +90,14 @@ wait_idle() {
         reason="$(busy_reason)"
         [ -z "$reason" ] && return 0
         if [ "$reason" != "$last_reason" ]; then
-            log "resto sveglio: $reason"
+            log "staying awake: $reason"
             last_reason="$reason"
         fi
         sleep "$POLL"
     done
 }
 
-# Attende che postfix abbia consegnato la posta (massimo 2 minuti)
+# Waits for postfix to deliver the mail (2 minutes at most)
 flush_mail() {
     command -v postqueue >/dev/null 2>&1 || { sleep 30; return; }
     i=0
@@ -106,10 +106,10 @@ flush_mail() {
         sleep 10
         i=$(( i + 1 ))
     done
-    log "posta ancora in coda dopo 2 minuti"
+    log "mail still queued after 2 minutes"
 }
 
-# Secondi che mancano alla prossima sveglia
+# Seconds until the next wake-up
 seconds_to_wake() {
     n="$(now)"
     target="$(date -d "today $WAKE_TIME" +%s)"
@@ -122,23 +122,23 @@ seconds_to_wake() {
 # ------------------------------------------------------------------------- main
 
 if [ "$(id -u)" -ne 0 ]; then
-    echo "borgreplay-cycle: va eseguito come root" >&2
+    echo "borgreplay-cycle: must be run as root" >&2
     exit 2
 fi
 
 while :; do
     start="$(now)"
-    log "sveglio, attendo la replica (massimo $SYNC_WAIT_MIN minuti)"
+    log "awake, waiting for the replica (at most $SYNC_WAIT_MIN minutes)"
     sleep "$SETTLE"
 
     if wait_sync "$start"; then
-        log "replica completata"
+        log "replica completed"
     else
-        log "nessuna replica entro $SYNC_WAIT_MIN minuti"
+        log "no replica within $SYNC_WAIT_MIN minutes"
     fi
 
     if scrub_due; then
-        log "avvio lo scrub del pool $POOL"
+        log "starting scrub of pool $POOL"
         zpool scrub "$POOL"
     fi
     while pool_busy; do
@@ -152,16 +152,16 @@ while :; do
     fi
     flush_mail
 
-    # Sospende; se la macchina e' tornata occupata o la sospensione fallisce, riprova
+    # Suspends; if the machine got busy again or suspend fails, retries
     while :; do
         wait_idle
         secs="$(seconds_to_wake)"
-        log "sospendo per $(( secs / 60 )) minuti (sveglia alle $WAKE_TIME)"
+        log "suspending for $(( secs / 60 )) minutes (wake-up at $WAKE_TIME)"
         sync
         if rtcwake -m mem -s "$secs" >/dev/null 2>&1; then
             break
         fi
-        log "sospensione fallita, riprovo tra 10 minuti"
+        log "suspend failed, retrying in 10 minutes"
         sleep 600
     done
 done

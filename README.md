@@ -1,139 +1,142 @@
 # borgreplay
 
-Ciclo giornaliero veglia / replica / controllo / sospensione per il server di
-replica Borg `borgreplay` (Void Linux, runit, pool ZFS `backup`).
+**English** | [Italiano](README_IT.md)
 
-La macchina passa la giornata sospesa in RAM (S3). Ogni notte si sveglia da sola
-tramite l'RTC, riceve la replica Borg, esegue i controlli di salute, manda le
-eventuali mail e torna a dormire fino alla notte successiva.
+Daily wake / replica / check / suspend cycle for the Borg replica server
+`borgreplay` (Void Linux, runit, ZFS pool `backup`).
 
-## Componenti
+The machine spends the day suspended to RAM (S3). Every night it wakes up on its
+own through the RTC, receives the Borg replica, runs the health checks, sends
+any mail and goes back to sleep until the next night.
 
-| File nel progetto            | Installato in                      | Ruolo |
-|------------------------------|------------------------------------|-------|
-| `bin/borgreplay-cycle`       | `/usr/local/bin/borgreplay-cycle`  | ciclo veglia / replica / scrub / check / sospensione |
-| `bin/borgreplay-check`       | `/usr/local/bin/borgreplay-check`  | controlli di salute con notifica via mail |
-| `sv/borgreplay-cycle/run`    | `/etc/sv/borgreplay-cycle/run`     | servizio runit che esegue il ciclo |
-| `cron.d/borgreplay-check`    | `/etc/cron.d/borgreplay-check`     | notifica di avvio a freddo (`@reboot`) |
-| `etc/borgreplay-cycle.conf`  | `/etc/borgreplay-cycle.conf`       | impostazioni locali (sovrascrive i default) |
-| `client/bck_sync_to_borgreplay` | `/usr/local/bin/` sull'host `borg` | replica rsync e scrittura del marker `.last_sync` |
+## Components
 
-## Funzionamento
+| File in the project          | Installed as                       | Role |
+|------------------------------|------------------------------------|------|
+| `bin/borgreplay-cycle`       | `/usr/local/bin/borgreplay-cycle`  | wake / replica / scrub / check / suspend cycle |
+| `bin/borgreplay-check`       | `/usr/local/bin/borgreplay-check`  | health checks with mail notification |
+| `sv/borgreplay-cycle/run`    | `/etc/sv/borgreplay-cycle/run`     | runit service running the cycle |
+| `cron.d/borgreplay-check`    | `/etc/cron.d/borgreplay-check`     | cold boot notification (`@reboot`) |
+| `etc/borgreplay-cycle.conf`  | `/etc/borgreplay-cycle.conf`       | local settings (override the defaults) |
+| `client/bck_sync_to_borgreplay` | `/usr/local/bin/` on host `borg` | rsync replica and `.last_sync` marker |
 
-A ogni risveglio (o avvio) `borgreplay-cycle`:
+## How it works
 
-1. aspetta che borg completi la replica, cioe' che `/backup/borgrepo/.last_sync`
-   diventi piu' recente del risveglio (massimo `SYNC_WAIT_MIN` = 180 minuti);
-2. se l'ultimo scrub del pool ha piu' di `SCRUB_EVERY_DAYS` (30) giorni lo avvia
-   e ne attende la fine;
-3. esegue `borgreplay-check` (con `--report` il giorno `REPORT_DOW`, lunedi');
-4. attende che la coda di postfix si svuoti;
-5. aspetta che la macchina sia libera: nessun utente collegato, nessun rsync,
-   nessuno scrub/resilver, nessun file `/etc/borgreplay-stay-awake`;
-6. sospende con `rtcwake -m mem -s <secondi>` fino alla prossima `WAKE_TIME`.
+On every wake-up (or boot) `borgreplay-cycle`:
 
-Il file `.last_sync` viene aggiornato dal lato client (host `borg`) a fine replica,
-vedi sotto.
+1. waits for borg to complete the replica, i.e. for `/backup/borgrepo/.last_sync`
+   to become newer than the wake-up (at most `SYNC_WAIT_MIN` = 180 minutes);
+2. if the last pool scrub is older than `SCRUB_EVERY_DAYS` (30) days, starts one
+   and waits for it to finish;
+3. runs `borgreplay-check` (with `--report` on day `REPORT_DOW`, Monday);
+4. waits for the postfix queue to empty;
+5. waits for the machine to be idle: no logged-in users, no rsync, no
+   scrub/resilver, no `/etc/borgreplay-stay-awake` file;
+6. suspends with `rtcwake -m mem -s <seconds>` until the next `WAKE_TIME`.
 
-## Lato client: host `borg`
+The `.last_sync` file is updated by the client side (host `borg`) when the
+replica ends, see below.
 
-| File nel progetto                | Installato su `borg` (Debian 13, 192.0.2.20) |
-|----------------------------------|--------------------------------------------------|
-| `client/bck_sync_to_borgreplay`  | `/usr/local/bin/bck_sync_to_borgreplay`          |
-| `client/crontab-root`            | crontab di root (`sudo crontab -e`)              |
+## Client side: host `borg`
 
-Lo script, lanciato da root:
+| File in the project              | Installed on `borg` (Debian 13, 192.0.2.20) |
+|----------------------------------|-------------------------------------------------|
+| `client/bck_sync_to_borgreplay`  | `/usr/local/bin/bck_sync_to_borgreplay`         |
+| `client/crontab-root`            | root's crontab (`sudo crontab -e`)              |
 
-1. annota l'ora di inizio in UTC (`YYYYMMDD_HHMMSS`);
-2. copia `/mnt/backup/` in `backup@192.0.2.10:/backup/borgrepo` con
-   `rsync -aAXH --delete`, usando la chiave `/root/.ssh/id_ed25519_borgreplay`
-   (in alternativa, via WireGuard: `192.0.2.30`);
-3. scrive l'ora di inizio in `/backup/borgrepo/.last_sync`. Su `borgreplay` e'
-   questo a far capire a `borgreplay-cycle` che la replica e' finita.
+The script, run as root:
 
-Lo lancia ogni giorno alle 04:50 il crontab di root su `borg`:
+1. records the start time in UTC (`YYYYMMDD_HHMMSS`);
+2. copies `/mnt/backup/` to `backup@192.0.2.10:/backup/borgrepo` with
+   `rsync -aAXH --delete`, using the key `/root/.ssh/id_ed25519_borgreplay`
+   (alternatively, over WireGuard: `192.0.2.30`);
+3. writes the start time to `/backup/borgrepo/.last_sync`. On `borgreplay` this
+   is what tells `borgreplay-cycle` that the replica is done.
+
+Root's crontab on `borg` runs it every day at 04:50:
 
 ```
 50  4 * * * /usr/local/bin/bck_sync_to_borgreplay
 ```
 
-Deve partire dopo `WAKE_TIME` (04:40) piu' `SETTLE` (30 s): se parte prima,
-`borgreplay` e' ancora sospesa e la replica fallisce. Se si cambia uno dei due
-orari va cambiato anche l'altro.
+It must start after `WAKE_TIME` (04:40) plus `SETTLE` (30 s): if it starts
+earlier, `borgreplay` is still suspended and the replica fails. If you change
+one of the two times, change the other as well.
 
-Sulla macchina `borgreplay` la chiave corrispondente e' in
-`~backup/.ssh/authorized_keys` (commento `root@borg`).
+On `borgreplay` the matching key is in `~backup/.ssh/authorized_keys`
+(comment `root@borg`).
 
-Il marker viene scritto solo se `rsync` termina senza errori. Se la copia fallisce,
-lo script scrive il codice d'errore nel syslog di `borg` (tag
-`bck_sync_to_borgreplay`) ed esce con lo stesso codice. Su `borgreplay` il ciclo
-attende fino a `SYNC_WAIT_MIN` minuti prima di sospendere, e `borgreplay-check`
-manda l'allarme quando il marker supera `SYNC_MAX_DAYS` (2 giorni).
+The marker is written only if `rsync` exits without errors. If the copy fails,
+the script logs the error code to `borg`'s syslog (tag `bck_sync_to_borgreplay`)
+and exits with the same code. On `borgreplay` the cycle waits up to
+`SYNC_WAIT_MIN` minutes before suspending, and `borgreplay-check` sends the alarm
+once the marker is older than `SYNC_MAX_DAYS` (2 days).
 
-### Mail inviate da `borgreplay-check`
+### Mail sent by `borgreplay-check`
 
-| Quando                  | Oggetto                              |
+| When                    | Subject                              |
 |-------------------------|--------------------------------------|
-| problema nuovo          | `[borgreplay] ALLARME: problemi rilevati` (ripetuta dopo 23 ore se invariato) |
-| problema risolto        | `[borgreplay] Rientrato: tutto OK`   |
-| lunedi'                 | `[borgreplay] Rapporto: tutto OK` / `PROBLEMI` |
-| avvio a freddo          | `[borgreplay] Sistema avviato`       |
+| new problem             | `[borgreplay] ALARM: problems detected` (repeated after 23 hours if unchanged) |
+| problem resolved        | `[borgreplay] Resolved: all OK`      |
+| Monday                  | `[borgreplay] Report: all OK` / `PROBLEMS` |
+| cold boot               | `[borgreplay] System booted`         |
 
-Nelle notti senza problemi non parte nessuna mail.
+On nights without problems no mail is sent.
 
-Controlli: stato e occupazione del pool ZFS, eta' dell'ultimo scrub, SMART,
-temperature dei dischi (`drivetemp`), eta' dell'ultima replica, spazio sulla
-root, handshake WireGuard, ventole (`nct6775`), servizi runit, UPS (`apcupsd`).
+Checks: ZFS pool health and usage, age of the last scrub, SMART, disk
+temperatures (`drivetemp`), age of the last replica, root filesystem space,
+WireGuard handshake, fans (`nct6775`), runit services, UPS (`apcupsd`).
 
-## Configurazione
+## Configuration
 
-Le variabili all'inizio di `borgreplay-cycle` si possono sovrascrivere in
-`/etc/borgreplay-cycle.conf`. Configurazione attuale:
+The variables at the top of `borgreplay-cycle` can be overridden in
+`/etc/borgreplay-cycle.conf`. Current configuration:
 
 ```sh
 WAKE_TIME="04:40"
 ```
 
-Le soglie di `borgreplay-check` (destinatario, percentuali, temperature...) si
-cambiano direttamente nello script.
+The `borgreplay-check` thresholds (recipient, percentages, temperatures...) are
+changed directly in the script.
 
-## Installazione
+## Installation
 
 ```sh
 sudo ./install.sh
 ```
 
-`install.sh` installa solo la parte di `borgreplay`. Sul client va copiato a mano:
+`install.sh` only installs the `borgreplay` side. The client script is copied by
+hand:
 
 ```sh
 scp client/bck_sync_to_borgreplay admin@192.0.2.20:/tmp/
 ssh -t admin@192.0.2.20 'sudo install -m 755 /tmp/bck_sync_to_borgreplay /usr/local/bin/'
 ```
 
-Dipendenze: `util-linux` (rtcwake), `zfs`, `smartmontools`, `postfix`, `cronie`.
-Opzionali: `wireguard-tools`, `apcupsd`, moduli `drivetemp` e `nct6775`.
+Dependencies: `util-linux` (rtcwake), `zfs`, `smartmontools`, `postfix`, `cronie`.
+Optional: `wireguard-tools`, `apcupsd`, `drivetemp` and `nct6775` modules.
 
-## Uso
+## Usage
 
 ```sh
-sudo touch /etc/borgreplay-stay-awake       # tienila sveglia
-sudo rm /etc/borgreplay-stay-awake          # lasciala riaddormentare
-sudo sv status borgreplay-cycle             # stato del servizio
-sudo sv down borgreplay-cycle               # ferma il ciclo (fino al riavvio)
-sudo borgreplay-check --stdout              # controlli a video, senza mail
-grep borgreplay /var/log/socklog/user/current   # log del ciclo
+sudo touch /etc/borgreplay-stay-awake       # keep it awake
+sudo rm /etc/borgreplay-stay-awake          # let it sleep again
+sudo sv status borgreplay-cycle             # service status
+sudo sv down borgreplay-cycle               # stop the cycle (until reboot)
+sudo borgreplay-check --stdout              # checks on screen, no mail
+grep borgreplay /var/log/socklog/user/current   # cycle log
 ```
 
-## Disinstallazione
+## Uninstallation
 
 ```sh
 sudo ./uninstall.sh
 ```
 
-## Note
+## Notes
 
-- `/etc/cron.d/zfs-maintenance` (scrub il 1 del mese alle 03:00 e avviso ntfy
-  alle 06:30) non fa parte del progetto. Con la macchina sospesa a quegli orari
-  non viene eseguito: lo scrub e' gia' gestito da `borgreplay-cycle`.
-- Se manca la corrente mentre la macchina e' sospesa, al ritorno riparte da
-  zero e il cron `@reboot` manda la mail "Sistema avviato".
+- `/etc/cron.d/zfs-maintenance` (scrub on the 1st of the month at 03:00 and ntfy
+  alert at 06:30) is not part of the project. With the machine suspended at
+  those times it never runs: the scrub is already handled by `borgreplay-cycle`.
+- If power is lost while the machine is suspended, it boots from scratch when
+  power returns and the `@reboot` cron job sends the "System booted" mail.

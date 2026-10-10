@@ -1,3 +1,3 @@
-# Riga del crontab di root sull'host borg (sudo crontab -e)
-# Deve partire dopo WAKE_TIME (04:40) di borgreplay-cycle piu' SETTLE (30 s)
+# Line of root's crontab on host borg (sudo crontab -e)
+# Must start after WAKE_TIME (04:40) of borgreplay-cycle plus SETTLE (30 s)
 50  4 * * * /usr/local/bin/bck_sync_to_borgreplay
