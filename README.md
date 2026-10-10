@@ -27,6 +27,8 @@ On every wake-up (or boot) `borgreplay-cycle`:
 
 1. waits for borg to complete the replica, i.e. for `/backup/borgrepo/.last_sync`
    to become newer than the wake-up (at most `SYNC_WAIT_MIN` = 180 minutes);
+   if the marker carries a `stay-awake` request, creates
+   `/etc/borgreplay-stay-awake` (see [Remote stay-awake](#remote-stay-awake));
 2. if the last pool scrub is older than `SCRUB_EVERY_DAYS` (30) days, starts one
    and waits for it to finish;
 3. runs `borgreplay-check` (with `--report` on day `REPORT_DOW`, Monday);
@@ -55,25 +57,6 @@ The script, run as root:
 3. writes the start time to `/backup/borgrepo/.last_sync`. On `borgreplay` this
    is what tells `borgreplay-cycle` that the replica is done.
 
-With `--stay-awake` the marker becomes `YYYYMMDD_HHMMSS stay-awake`: when the
-replica is done `borgreplay-cycle` creates `/etc/borgreplay-stay-awake` (with a
-note inside) and the machine stays on until you remove it after the remote
-login:
-
-```sh
-sudo bck_sync_to_borgreplay --stay-awake    # on the Borg host
-sudo rm /etc/borgreplay-stay-awake          # on borgreplay, when done
-```
-
-Running the script by hand only works while `borgreplay` is awake. To ask for
-it with the nightly cron run instead, create the request file on the Borg host
-(`STAY_AWAKE_REQUEST` in `.env`); it is deleted once the marker has been
-written:
-
-```sh
-sudo touch /etc/borgreplay-stay-awake.request   # on the Borg host
-```
-
 Root's crontab on the Borg host runs it every day at 04:50:
 
 ```
@@ -92,6 +75,60 @@ the script logs the error code to the Borg host's syslog (tag `bck_sync_to_borgr
 and exits with the same code. On `borgreplay` the cycle waits up to
 `SYNC_WAIT_MIN` minutes before suspending, and `borgreplay-check` sends the alarm
 once the marker is older than `SYNC_MAX_DAYS` (2 days).
+
+## Remote stay-awake
+
+`borgreplay` is reachable only in the few minutes around the nightly replica.
+To keep it on for maintenance without being there at 04:40, ask for it from the
+Borg host: the request travels with the replica, inside the marker.
+
+```
+Borg host                                borgreplay
+---------                                ----------
+touch /etc/borgreplay-stay-awake.request
+04:50  rsync /mnt/backup/  ------------> /backup/borgrepo/
+       marker "<date> stay-awake" -----> /backup/borgrepo/.last_sync
+       request file deleted              borgreplay-cycle sees "stay-awake"
+                                         creates /etc/borgreplay-stay-awake
+                                         stays on until the file is removed
+```
+
+1. **Ask**, on the Borg host:
+
+   ```sh
+   sudo touch /etc/borgreplay-stay-awake.request
+   ```
+
+   The next replica, normally the nightly cron run, writes the marker as
+   `YYYYMMDD_HHMMSS stay-awake` and deletes the request file. The request is
+   used once: create the file again for another night. If writing the marker
+   fails the request is kept and retried on the next run.
+
+2. **Work** on `borgreplay`: after the replica it does not suspend.
+   `/etc/borgreplay-stay-awake` contains a note with the time and the replica
+   that asked for it, and the log shows
+   `stay-awake requested by the replica, /etc/borgreplay-stay-awake created`.
+
+3. **Release** it when done, on `borgreplay`:
+
+   ```sh
+   sudo rm /etc/borgreplay-stay-awake
+   ```
+
+   Within a minute, once no user is logged in, the machine suspends until the
+   next `WAKE_TIME`.
+
+While `borgreplay` is already awake you can also send the request right away,
+without waiting for the night:
+
+```sh
+sudo bck_sync_to_borgreplay --stay-awake    # on the Borg host
+```
+
+The path of the request file is `STAY_AWAKE_REQUEST` in `.env` (default
+`/etc/borgreplay-stay-awake.request`). The two sides are compatible across
+versions: an old client never asks, an old `borgreplay-cycle` ignores the
+request.
 
 ### Mail sent by `borgreplay-check`
 
@@ -123,6 +160,7 @@ cp .env.sample .env
 | `REPLICA_HOST` | `bck_sync_to_borgreplay`   | address of `borgreplay` as reached from the Borg host |
 | `REPLICA_USER` | `bck_sync_to_borgreplay`   | user owning `/backup/borgrepo` on `borgreplay` |
 | `SSH_KEY`      | `bck_sync_to_borgreplay`   | SSH key of root on the Borg host (optional) |
+| `STAY_AWAKE_REQUEST` | `bck_sync_to_borgreplay` | request file for the [remote stay-awake](#remote-stay-awake) (optional) |
 | `CLIENT_HOST`, `CLIENT_USER` | `install-client.sh` | where to install the client side |
 
 The variables at the top of `borgreplay-cycle` can be overridden in
@@ -181,10 +219,19 @@ To move from `install.sh` to the package, back up the two files in `/etc`, run
 ```sh
 sudo touch /etc/borgreplay-stay-awake       # keep it awake
 sudo rm /etc/borgreplay-stay-awake          # let it sleep again
+cat /backup/borgrepo/.last_sync             # last replica (and stay-awake flag)
 sudo sv status borgreplay-cycle             # service status
 sudo sv down borgreplay-cycle               # stop the cycle (until reboot)
 sudo borgreplay-check --stdout              # checks on screen, no mail
 grep borgreplay /var/log/socklog/user/current   # cycle log
+```
+
+On the Borg host:
+
+```sh
+sudo touch /etc/borgreplay-stay-awake.request   # keep borgreplay awake after the next replica
+sudo bck_sync_to_borgreplay --stay-awake        # same, right now (borgreplay must be awake)
+journalctl -t bck_sync_to_borgreplay            # client log
 ```
 
 ## Uninstallation
