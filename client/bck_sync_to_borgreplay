@@ -1,12 +1,25 @@
 #!/bin/bash
+#
+# bck_sync_to_borgreplay - copies the Borg repositories to borgreplay and
+# writes the .last_sync marker
+#
+# REPLICA_HOST, REPLICA_USER and SSH_KEY are read from /etc/borgreplay.env
 
-DEST=192.0.2.10
-#DEST=192.0.2.30
-KEY='-i ~/.ssh/id_ed25519_borgreplay'
+SSH_KEY=~/.ssh/id_ed25519_borgreplay
+[ -r /etc/borgreplay.env ] && . /etc/borgreplay.env
+
+if [ -z "$REPLICA_HOST" ] || [ -z "$REPLICA_USER" ]; then
+    logger -t bck_sync_to_borgreplay "REPLICA_HOST or REPLICA_USER not set in /etc/borgreplay.env"
+    echo "bck_sync_to_borgreplay: REPLICA_HOST or REPLICA_USER not set in /etc/borgreplay.env" >&2
+    exit 2
+fi
+
+DEST="$REPLICA_USER@$REPLICA_HOST"
+KEY="-i $SSH_KEY"
 START_DATETIME="$(date --u +%Y%m%d_%H%M%S)"
 
 
-rsync -aAXH --delete   -e "ssh $KEY"   /mnt/backup/   backup@$DEST:/backup/borgrepo
+rsync -aAXH --delete   -e "ssh $KEY"   /mnt/backup/   $DEST:/backup/borgrepo
 RC=$?
 # Write the marker only if the copy is complete: borgreplay-check reports
 # the missing replica when the marker gets old
@@ -14,5 +27,4 @@ if [ $RC -ne 0 ]; then
     logger -t bck_sync_to_borgreplay "rsync failed (code $RC), marker not updated"
     exit $RC
 fi
-#ssh $KEY backup@$DEST 'touch /backup/borgrepo/.last_sync'
-ssh $KEY backup@$DEST "echo $START_DATETIME > /backup/borgrepo/.last_sync"
+ssh $KEY $DEST "echo $START_DATETIME > /backup/borgrepo/.last_sync"

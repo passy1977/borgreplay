@@ -18,7 +18,8 @@ eventuali mail e torna a dormire fino alla notte successiva.
 | `sv/borgreplay-cycle/run`    | `/etc/sv/borgreplay-cycle/run`     | servizio runit che esegue il ciclo |
 | `cron.d/borgreplay-check`    | `/etc/cron.d/borgreplay-check`     | notifica di avvio a freddo (`@reboot`) |
 | `etc/borgreplay-cycle.conf`  | `/etc/borgreplay-cycle.conf`       | impostazioni locali (sovrascrive i default) |
-| `client/bck_sync_to_borgreplay` | `/usr/local/bin/` sull'host `borg` | replica rsync e scrittura del marker `.last_sync` |
+| `client/bck_sync_to_borgreplay` | `/usr/local/bin/` sull'host Borg | replica rsync e scrittura del marker `.last_sync` |
+| `.env` (da `.env.sample`)    | `/etc/borgreplay.env` su entrambi gli host | impostazioni locali: indirizzi, utenti, destinatario mail |
 
 ## Funzionamento
 
@@ -34,26 +35,27 @@ A ogni risveglio (o avvio) `borgreplay-cycle`:
    nessuno scrub/resilver, nessun file `/etc/borgreplay-stay-awake`;
 6. sospende con `rtcwake -m mem -s <secondi>` fino alla prossima `WAKE_TIME`.
 
-Il file `.last_sync` viene aggiornato dal lato client (host `borg`) a fine replica,
+Il file `.last_sync` viene aggiornato dal lato client (l'host Borg) a fine replica,
 vedi sotto.
 
-## Lato client: host `borg`
+## Lato client: l'host Borg
 
-| File nel progetto                | Installato su `borg` (Debian 13, 192.0.2.20) |
+| File nel progetto                | Installato sull'host Borg                        |
 |----------------------------------|--------------------------------------------------|
 | `client/bck_sync_to_borgreplay`  | `/usr/local/bin/bck_sync_to_borgreplay`          |
+| `.env`                           | `/etc/borgreplay.env`                            |
 | `client/crontab-root`            | crontab di root (`sudo crontab -e`)              |
 
 Lo script, lanciato da root:
 
 1. annota l'ora di inizio in UTC (`YYYYMMDD_HHMMSS`);
-2. copia `/mnt/backup/` in `backup@192.0.2.10:/backup/borgrepo` con
-   `rsync -aAXH --delete`, usando la chiave `/root/.ssh/id_ed25519_borgreplay`
-   (in alternativa, via WireGuard: `192.0.2.30`);
+2. copia `/mnt/backup/` in `$REPLICA_USER@$REPLICA_HOST:/backup/borgrepo` con
+   `rsync -aAXH --delete`, usando la chiave `$SSH_KEY`
+   (predefinita `/root/.ssh/id_ed25519_borgreplay`);
 3. scrive l'ora di inizio in `/backup/borgrepo/.last_sync`. Su `borgreplay` e'
    questo a far capire a `borgreplay-cycle` che la replica e' finita.
 
-Lo lancia ogni giorno alle 04:50 il crontab di root su `borg`:
+Lo lancia ogni giorno alle 04:50 il crontab di root sull'host Borg:
 
 ```
 50  4 * * * /usr/local/bin/bck_sync_to_borgreplay
@@ -63,11 +65,11 @@ Deve partire dopo `WAKE_TIME` (04:40) piu' `SETTLE` (30 s): se parte prima,
 `borgreplay` e' ancora sospesa e la replica fallisce. Se si cambia uno dei due
 orari va cambiato anche l'altro.
 
-Sulla macchina `borgreplay` la chiave corrispondente e' in
-`~backup/.ssh/authorized_keys` (commento `root@borg`).
+Su `borgreplay` la chiave pubblica corrispondente e' negli `authorized_keys` di
+`$REPLICA_USER`.
 
 Il marker viene scritto solo se `rsync` termina senza errori. Se la copia fallisce,
-lo script scrive il codice d'errore nel syslog di `borg` (tag
+lo script scrive il codice d'errore nel syslog dell'host Borg (tag
 `bck_sync_to_borgreplay`) ed esce con lo stesso codice. Su `borgreplay` il ciclo
 attende fino a `SYNC_WAIT_MIN` minuti prima di sospendere, e `borgreplay-check`
 manda l'allarme quando il marker supera `SYNC_MAX_DAYS` (2 giorni).
@@ -90,6 +92,21 @@ root, handshake WireGuard, ventole (`nct6775`), servizi runit, UPS (`apcupsd`).
 
 ## Configurazione
 
+Le impostazioni locali stanno in `.env`, che git non traccia. Si parte dal
+modello:
+
+```sh
+cp .env.sample .env
+```
+
+| Variabile      | Usata da                   | Significato |
+|----------------|----------------------------|-------------|
+| `MAILTO`       | `borgreplay-check`         | destinatario delle mail |
+| `REPLICA_HOST` | `bck_sync_to_borgreplay`   | indirizzo di `borgreplay` visto dall'host Borg |
+| `REPLICA_USER` | `bck_sync_to_borgreplay`   | utente proprietario di `/backup/borgrepo` su `borgreplay` |
+| `SSH_KEY`      | `bck_sync_to_borgreplay`   | chiave SSH di root sull'host Borg (facoltativa) |
+| `CLIENT_HOST`, `CLIENT_USER` | `install-client.sh` | dove installare il lato client |
+
 Le variabili all'inizio di `borgreplay-cycle` si possono sovrascrivere in
 `/etc/borgreplay-cycle.conf`. Configurazione attuale:
 
@@ -106,12 +123,15 @@ cambiano direttamente nello script.
 sudo ./install.sh
 ```
 
-`install.sh` installa solo la parte di `borgreplay`. Sul client va copiato a mano:
+`install.sh` installa la parte di `borgreplay`, compreso `.env` come
+`/etc/borgreplay.env`. Il lato client si installa via SSH da questa macchina
+(chiede la password di sudo sull'host Borg):
 
 ```sh
-scp client/bck_sync_to_borgreplay admin@192.0.2.20:/tmp/
-ssh -t admin@192.0.2.20 'sudo install -m 755 /tmp/bck_sync_to_borgreplay /usr/local/bin/'
+./install-client.sh
 ```
+
+La riga di crontab in `client/crontab-root` va aggiunta a mano sull'host Borg.
 
 Dipendenze: `util-linux` (rtcwake), `zfs`, `smartmontools`, `postfix`, `cronie`.
 Opzionali: `wireguard-tools`, `apcupsd`, moduli `drivetemp` e `nct6775`.
@@ -135,7 +155,7 @@ sudo ./uninstall.sh
 
 ## Note
 
-- `/etc/cron.d/zfs-maintenance` (scrub il 1 del mese alle 03:00 e avviso ntfy
+- `/etc/cron.d/zfs-maintenance` (scrub il 1 del mese alle 03:00 e avviso
   alle 06:30) non fa parte del progetto. Con la macchina sospesa a quegli orari
   non viene eseguito: lo scrub e' gia' gestito da `borgreplay-cycle`.
 - Se manca la corrente mentre la macchina e' sospesa, al ritorno riparte da

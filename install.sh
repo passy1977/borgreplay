@@ -4,7 +4,8 @@
 #
 # Usage (as root):   ./install.sh
 #
-# An existing /etc/borgreplay-cycle.conf is not overwritten.
+# Site settings are taken from .env (see .env.sample) and installed as
+# /etc/borgreplay.env. An existing /etc/borgreplay-cycle.conf is not overwritten.
 
 set -e
 
@@ -14,6 +15,13 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 
 cd "$(dirname "$0")"
+
+if [ ! -r .env ]; then
+    echo "install.sh: .env missing, copy .env.sample to .env and fill it in" >&2
+    exit 2
+fi
+
+install -m 644 .env /etc/borgreplay.env
 
 install -m 755 bin/borgreplay-cycle /usr/local/bin/borgreplay-cycle
 install -m 755 bin/borgreplay-check /usr/local/bin/borgreplay-check
