@@ -23,7 +23,7 @@ SYNC_WAIT_MIN=180                           # maximum wait for the replica (minu
 SCRUB_EVERY_DAYS=30                         # interval between two scrubs
 REPORT_DOW=1                                # day of the full report (1 = Monday)
 STAY_AWAKE="/etc/borgreplay-stay-awake"     # if present, no suspend
-CHECK="/usr/local/bin/borgreplay-check"
+CHECK="borgreplay-check"                    # looked up in PATH
 POLL=60                                     # polling interval (seconds)
 SETTLE=30                                   # wait after wake-up (network, tunnel)
 

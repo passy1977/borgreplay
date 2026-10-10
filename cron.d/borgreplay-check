@@ -7,4 +7,4 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 MAILTO=""
 
 # Boot notification (after a power outage or a reboot): waits for network, postfix and WireGuard
-@reboot       root  sleep 120; /usr/local/bin/borgreplay-check --boot
+@reboot       root  sleep 120; borgreplay-check --boot

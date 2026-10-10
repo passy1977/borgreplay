@@ -135,6 +135,28 @@ The crontab line in `client/crontab-root` is added by hand on the Borg host.
 Dependencies: `util-linux` (rtcwake), `zfs`, `smartmontools`, `postfix`, `cronie`.
 Optional: `wireguard-tools`, `apcupsd`, `drivetemp` and `nct6775` modules.
 
+### Void Linux package
+
+Instead of `install.sh` you can build and install an `xbps` package:
+
+```sh
+packaging/void/build.sh
+sudo xbps-install --repository "$PWD/dist" borgreplay
+sudo ln -s /etc/sv/borgreplay-cycle /var/service/    # enable the service
+```
+
+The package installs the scripts in `/usr/bin`, the runit service, the cron
+file and the documentation (with the client script) in
+`/usr/share/doc/borgreplay`. `/etc/borgreplay.env` and
+`/etc/borgreplay-cycle.conf` are configuration files: the package ships them
+commented out and upgrades keep your changes. Fill in `MAILTO` and `WAKE_TIME`
+after the first install.
+
+To move from `install.sh` to the package, back up the two files in `/etc`, run
+`sudo ./uninstall.sh` and install the package: otherwise the copies in
+`/usr/local/bin` take precedence. To build a new version, raise `VERSION` or
+`REVISION` in `packaging/void/build.sh`.
+
 ## Usage
 
 ```sh

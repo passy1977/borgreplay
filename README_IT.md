@@ -136,6 +136,27 @@ La riga di crontab in `client/crontab-root` va aggiunta a mano sull'host Borg.
 Dipendenze: `util-linux` (rtcwake), `zfs`, `smartmontools`, `postfix`, `cronie`.
 Opzionali: `wireguard-tools`, `apcupsd`, moduli `drivetemp` e `nct6775`.
 
+### Pacchetto Void Linux
+
+Al posto di `install.sh` si puo' creare e installare un pacchetto `xbps`:
+
+```sh
+packaging/void/build.sh
+sudo xbps-install --repository "$PWD/dist" borgreplay
+sudo ln -s /etc/sv/borgreplay-cycle /var/service/    # abilita il servizio
+```
+
+Il pacchetto installa gli script in `/usr/bin`, il servizio runit, il file cron
+e la documentazione (con lo script del client) in `/usr/share/doc/borgreplay`.
+`/etc/borgreplay.env` e `/etc/borgreplay-cycle.conf` sono file di configurazione:
+il pacchetto li installa commentati e gli aggiornamenti mantengono le tue
+modifiche. Dopo la prima installazione vanno impostati `MAILTO` e `WAKE_TIME`.
+
+Per passare da `install.sh` al pacchetto: salva i due file in `/etc`, lancia
+`sudo ./uninstall.sh` e installa il pacchetto, altrimenti le copie in
+`/usr/local/bin` hanno la precedenza. Per una nuova versione si aumenta
+`VERSION` o `REVISION` in `packaging/void/build.sh`.
+
 ## Uso
 
 ```sh

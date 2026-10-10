@@ -1,3 +1,5 @@
 #!/bin/sh
 # runit service: install as /etc/sv/borgreplay-cycle/run
-exec /usr/local/bin/borgreplay-cycle 2>&1
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+exec borgreplay-cycle 2>&1
