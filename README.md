@@ -40,22 +40,26 @@ vedi sotto.
 | File nel progetto                | Installato su `borg` (Debian 13, 192.0.2.20) |
 |----------------------------------|--------------------------------------------------|
 | `client/bck_sync_to_borgreplay`  | `/usr/local/bin/bck_sync_to_borgreplay`          |
+| `client/crontab-root`            | crontab di root (`sudo crontab -e`)              |
 
-Lo script:
+Lo script, lanciato da root:
 
 1. annota l'ora di inizio in UTC (`YYYYMMDD_HHMMSS`);
 2. copia `/mnt/backup/` in `backup@192.0.2.10:/backup/borgrepo` con
-   `rsync -aAXH --delete`, usando la chiave `~/.ssh/id_ed25519_borgreplay`
+   `rsync -aAXH --delete`, usando la chiave `/root/.ssh/id_ed25519_borgreplay`
    (in alternativa, via WireGuard: `192.0.2.30`);
 3. scrive l'ora di inizio in `/backup/borgrepo/.last_sync`. Su `borgreplay` e'
    questo a far capire a `borgreplay-cycle` che la replica e' finita.
 
-Lo script parte alle 04:50: nei log di `borgreplay` le connessioni SSH da
-192.0.2.20 arrivano alle 04:50 (rsync) e alle 04:51 (marker). La riga di
-crontab che lo lancia non e' stata verificata, perche' il crontab di root su
-`borg` non e' leggibile senza sudo. Deve partire dopo `WAKE_TIME` (04:40) piu'
-`SETTLE` (30 s): se parte prima, `borgreplay` e' ancora sospesa e la replica
-fallisce.
+Lo lancia ogni giorno alle 04:50 il crontab di root su `borg`:
+
+```
+50  4 * * * /usr/local/bin/bck_sync_to_borgreplay
+```
+
+Deve partire dopo `WAKE_TIME` (04:40) piu' `SETTLE` (30 s): se parte prima,
+`borgreplay` e' ancora sospesa e la replica fallisce. Se si cambia uno dei due
+orari va cambiato anche l'altro.
 
 Sulla macchina `borgreplay` la chiave corrispondente e' in
 `~backup/.ssh/authorized_keys` (commento `root@borg`).
