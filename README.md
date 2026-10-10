@@ -60,13 +60,11 @@ fallisce.
 Sulla macchina `borgreplay` la chiave corrispondente e' in
 `~backup/.ssh/authorized_keys` (commento `root@borg`).
 
-**Attenzione:** lo script non controlla l'esito di `rsync`. Se la copia fallisce,
-il marker viene scritto comunque e `borgreplay-check` non segnala nulla. Una
-correzione minima e' scrivere il marker solo se rsync riesce:
-
-```sh
-rsync ... && ssh $KEY backup@$DEST "echo $START_DATETIME > /backup/borgrepo/.last_sync"
-```
+Il marker viene scritto solo se `rsync` termina senza errori. Se la copia fallisce,
+lo script scrive il codice d'errore nel syslog di `borg` (tag
+`bck_sync_to_borgreplay`) ed esce con lo stesso codice. Su `borgreplay` il ciclo
+attende fino a `SYNC_WAIT_MIN` minuti prima di sospendere, e `borgreplay-check`
+manda l'allarme quando il marker supera `SYNC_MAX_DAYS` (2 giorni).
 
 ### Mail inviate da `borgreplay-check`
 

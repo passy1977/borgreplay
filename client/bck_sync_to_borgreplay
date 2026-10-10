@@ -7,7 +7,13 @@ START_DATETIME="$(date --u +%Y%m%d_%H%M%S)"
 
 
 rsync -aAXH --delete   -e "ssh $KEY"   /mnt/backup/   backup@$DEST:/backup/borgrepo
+RC=$?
+# Il marker va scritto solo se la copia e' completa: borgreplay-check segnala
+# la replica mancante quando il marker invecchia
+if [ $RC -ne 0 ]; then
+    logger -t bck_sync_to_borgreplay "rsync fallito (codice $RC), marker non aggiornato"
+    exit $RC
+fi
 #ssh $KEY backup@$DEST 'touch /backup/borgrepo/.last_sync'
 ssh $KEY backup@$DEST "echo $START_DATETIME > /backup/borgrepo/.last_sync"
-
 
