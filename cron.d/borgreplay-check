@@ -1,0 +1,10 @@
+# /etc/cron.d/borgreplay-check
+# Versione per la modalita' "sospensione a orario": controlli periodici, rapporto
+# settimanale e scrub sono gestiti da borgreplay-cycle, perche' cron non gira
+# mentre la macchina e' sospesa. Qui resta solo la notifica di avvio a freddo.
+
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+MAILTO=""
+
+# Notifica di avvio (dopo un blackout o un riavvio): attende rete, postfix e WireGuard
+@reboot       root  sleep 120; /usr/local/bin/borgreplay-check --boot

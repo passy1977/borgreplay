@@ -1,0 +1,416 @@
+#!/bin/sh
+#
+# borgreplay-check - controlli di salute di borgreplay con notifica via mail
+#
+# Uso (come root):
+#   borgreplay-check            controlla; manda una mail solo se ci sono problemi
+#   borgreplay-check --report   manda sempre il rapporto completo
+#   borgreplay-check --boot     notifica di avvio del sistema (con rapporto)
+#   borgreplay-check --stdout   stampa a video e non manda nulla (per le prove)
+#
+# Dipendenze: zfs, smartmontools, sendmail (postfix). Opzionali: wireguard-tools,
+# moduli drivetemp e nct6775, apcupsd.
+
+# ---------------------------------------------------------------- configurazione
+
+MAILTO="admin@example.com"
+
+POOL="backup"                               # pool ZFS da controllare
+POOL_MAX_PCT=80                             # % massima di occupazione del pool
+SCRUB_MAX_DAYS=40                           # giorni massimi dall'ultimo scrub
+
+SYNC_MARKER="/backup/borgrepo/.last_sync"   # file toccato da borg a fine replica
+SYNC_MAX_DAYS=2                             # giorni massimi senza replica
+
+ROOT_MAX_PCT=85                             # % massima di occupazione della root
+TEMP_MAX=45                                 # temperatura massima dei dischi (C)
+
+FANS="1 2 3"                                # canali fanN che devono girare
+FAN_MIN_RPM=300                             # sotto questa soglia = ventola ferma
+
+WG_MAX_SEC=600                              # eta' massima dell'handshake WireGuard
+                                            # (richiede PersistentKeepalive sul peer)
+
+STATE_DIR="/var/lib/borgreplay-check"       # stato per non ripetere le stesse mail
+REPEAT_MIN=1380                             # ripeti un allarme invariato dopo 23 ore
+
+# ------------------------------------------------------------------------------
+
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+LC_ALL=C
+export LC_ALL
+
+MODE="${1:-check}"
+HOST="$(hostname)"
+NOW="$(date +%s)"
+PROBLEMS=""
+NL='
+'
+
+warn() {
+    PROBLEMS="${PROBLEMS}- $*${NL}"
+}
+
+have() {
+    command -v "$1" >/dev/null 2>&1
+}
+
+# ------------------------------------------------------------------- controlli
+
+check_zfs() {
+    if ! have zpool; then
+        warn "ZFS: comando zpool non trovato"
+        return
+    fi
+
+    st="$(zpool status -x "$POOL" 2>&1)"
+    case "$st" in
+        *"is healthy"*) ;;
+        *) warn "ZFS: il pool '$POOL' non e' sano (vedi dettagli)" ;;
+    esac
+
+    cap="$(zpool list -H -o capacity "$POOL" 2>/dev/null | tr -d '%')"
+    if [ -n "$cap" ] && [ "$cap" -ge "$POOL_MAX_PCT" ]; then
+        warn "ZFS: pool '$POOL' pieno al ${cap}% (soglia ${POOL_MAX_PCT}%)"
+    fi
+
+    full="$(zpool status "$POOL" 2>/dev/null)"
+    case "$full" in
+        *"scrub in progress"*) return ;;
+    esac
+    last="$(printf '%s\n' "$full" | sed -n 's/.*scrub repaired.* on //p')"
+    if [ -z "$last" ]; then
+        warn "ZFS: nessuno scrub registrato sul pool '$POOL'"
+    else
+        ts="$(date -d "$last" +%s 2>/dev/null)"
+        if [ -n "$ts" ]; then
+            days=$(( (NOW - ts) / 86400 ))
+            if [ "$days" -gt "$SCRUB_MAX_DAYS" ]; then
+                warn "ZFS: ultimo scrub $days giorni fa (soglia $SCRUB_MAX_DAYS)"
+            fi
+        fi
+    fi
+}
+
+check_smart() {
+    if ! have smartctl; then
+        warn "SMART: comando smartctl non trovato"
+        return
+    fi
+
+    for dev in /dev/sd?; do
+        [ -b "$dev" ] || continue
+        # Slot vuoti (lettori di schede) e dispositivi rimovibili: non sono dischi
+        name="${dev#/dev/}"
+        [ "$(cat "/sys/block/$name/size" 2>/dev/null)" = "0" ] && continue
+        [ "$(cat "/sys/block/$name/removable" 2>/dev/null)" = "1" ] && continue
+        # -n standby: non risveglia un disco in standby
+        out="$(smartctl -n standby -i -H -A "$dev" 2>&1)"
+        case "$out" in
+            *"STANDBY"*|*"SLEEP"*) continue ;;
+        esac
+        # Dispositivi senza SMART (chiavette, adattatori USB): niente da controllare
+        case "$out" in
+            *"SMART support is: Enabled"*) ;;
+            *) continue ;;
+        esac
+
+        serial="$(printf '%s\n' "$out" | awk -F': *' '/^Serial Number/ {print $2}')"
+        id="$dev (${serial:-seriale sconosciuto})"
+
+        if ! printf '%s\n' "$out" | grep -q 'PASSED'; then
+            warn "SMART: $id non supera il test di salute"
+        fi
+
+        bad="$(printf '%s\n' "$out" | awk '
+            $1 == 5 || $1 == 197 || $1 == 198 {
+                if ($10 + 0 > 0) printf "%s=%s ", $2, $10
+            }')"
+        if [ -n "$bad" ]; then
+            warn "SMART: $id ha settori problematici: $bad"
+        fi
+    done
+}
+
+# Stampa "device modello seriale temperatura" per ogni disco visto da drivetemp
+disk_temps() {
+    for h in /sys/class/hwmon/hwmon*; do
+        [ "$(cat "$h/name" 2>/dev/null)" = "drivetemp" ] || continue
+        d="$(ls "$h/device/block" 2>/dev/null | head -1)"
+        [ -n "$d" ] || continue
+        t=$(( $(cat "$h/temp1_input") / 1000 ))
+        printf '%s|%s|%s|%s\n' "$d" \
+            "$(cat "$h/device/model" 2>/dev/null | sed 's/ *$//')" \
+            "$(lsblk -dno SERIAL "/dev/$d" 2>/dev/null)" \
+            "$t"
+    done
+}
+
+check_temps() {
+    temps="$(disk_temps)"
+    if [ -z "$temps" ]; then
+        warn "Temperature: nessun sensore drivetemp (modulo non caricato?)"
+        return
+    fi
+    old_ifs="$IFS"
+    IFS='|'
+    printf '%s\n' "$temps" | while read -r d model serial t; do
+        if [ "$t" -ge "$TEMP_MAX" ]; then
+            echo "Temperature: $d ($serial) a ${t}C (soglia ${TEMP_MAX}C)"
+        fi
+    done > "$TMP/temps"
+    IFS="$old_ifs"
+    while read -r line; do
+        [ -n "$line" ] && warn "$line"
+    done < "$TMP/temps"
+}
+
+check_sync() {
+    if [ ! -e "$SYNC_MARKER" ]; then
+        warn "Replica: marker $SYNC_MARKER assente (nessuna replica completata?)"
+        return
+    fi
+    limit=$(( SYNC_MAX_DAYS * 1440 ))
+    if [ -n "$(find "$SYNC_MARKER" -mmin +"$limit" 2>/dev/null)" ]; then
+        ts="$(stat -c %Y "$SYNC_MARKER")"
+        days=$(( (NOW - ts) / 86400 ))
+        warn "Replica: nessuna replica Borg da $days giorni (soglia $SYNC_MAX_DAYS)"
+    fi
+}
+
+check_root() {
+    pct="$(df -P / | awk 'NR == 2 { gsub("%", "", $5); print $5 }')"
+    if [ -n "$pct" ] && [ "$pct" -ge "$ROOT_MAX_PCT" ]; then
+        warn "Disco di sistema: root piena al ${pct}% (soglia ${ROOT_MAX_PCT}%)"
+    fi
+}
+
+check_wg() {
+    have wg || return
+    hs="$(wg show all latest-handshakes 2>/dev/null)"
+    if [ -z "$hs" ]; then
+        warn "WireGuard: nessuna interfaccia attiva"
+        return
+    fi
+    printf '%s\n' "$hs" | while read -r iface peer ts; do
+        if [ "$ts" = "0" ]; then
+            echo "WireGuard: $iface, nessun handshake con il peer"
+        else
+            age=$(( NOW - ts ))
+            if [ "$age" -gt "$WG_MAX_SEC" ]; then
+                echo "WireGuard: $iface, ultimo handshake $(( age / 60 )) minuti fa"
+            fi
+        fi
+    done > "$TMP/wg"
+    while read -r line; do
+        [ -n "$line" ] && warn "$line"
+    done < "$TMP/wg"
+}
+
+nct_dir() {
+    for h in /sys/class/hwmon/hwmon*; do
+        case "$(cat "$h/name" 2>/dev/null)" in
+            nct67*) echo "$h"; return ;;
+        esac
+    done
+}
+
+check_fans() {
+    dir="$(nct_dir)"
+    if [ -z "$dir" ]; then
+        warn "Ventole: chip nct67xx non disponibile (modulo nct6775 non caricato?)"
+        return
+    fi
+    for n in $FANS; do
+        rpm="$(cat "$dir/fan${n}_input" 2>/dev/null)"
+        if [ -z "$rpm" ] || [ "$rpm" -lt "$FAN_MIN_RPM" ]; then
+            warn "Ventole: fan$n a ${rpm:-?} RPM (ferma o scollegata)"
+        fi
+    done
+}
+
+check_services() {
+    have sv || return
+    for s in /var/service/*; do
+        if [ -L "$s" ] && [ ! -e "$s" ]; then
+            warn "Servizi: $(basename "$s") e' un link rotto in /var/service"
+            continue
+        fi
+        [ -d "$s" ] || continue
+        st="$(sv status "$s" 2>&1)"
+        case "$st" in
+            run:*) ;;
+            *) warn "Servizi: $(basename "$s") non in esecuzione ($st)" ;;
+        esac
+    done
+}
+
+check_ups() {
+    have apcaccess || return
+    st="$(apcaccess -p STATUS 2>/dev/null | sed 's/ *$//')"
+    case "$st" in
+        ONLINE*) ;;
+        "") warn "UPS: apcupsd non risponde" ;;
+        *) warn "UPS: stato '$st'" ;;
+    esac
+}
+
+# --------------------------------------------------------------------- rapporto
+
+details() {
+    echo "== Sistema =="
+    echo "Host:    $HOST"
+    echo "Data:    $(date '+%Y-%m-%d %H:%M:%S %Z')"
+    echo "Uptime: $(uptime)"
+    echo "Kernel:  $(uname -r)"
+    echo
+
+    echo "== Ultima replica Borg =="
+    if [ -e "$SYNC_MARKER" ]; then
+        date -r "$SYNC_MARKER" '+%Y-%m-%d %H:%M:%S'
+    else
+        echo "marker assente ($SYNC_MARKER)"
+    fi
+    echo
+
+    echo "== ZFS =="
+    zpool list "$POOL" 2>&1
+    echo
+    zpool status "$POOL" 2>&1
+    echo
+
+    echo "== Dischi =="
+    disk_temps | awk -F'|' '{ printf "%-5s %-24s %-18s %s C\n", $1, $2, $3, $4 }'
+    echo
+
+    echo "== Spazio =="
+    df -h / 2>&1
+    echo
+
+    echo "== Ventole e scheda madre =="
+    dir="$(nct_dir)"
+    if [ -n "$dir" ]; then
+        for n in $FANS; do
+            echo "fan$n: $(cat "$dir/fan${n}_input" 2>/dev/null) RPM"
+        done
+    else
+        echo "chip nct67xx non disponibile"
+    fi
+    echo
+
+    if have wg; then
+        echo "== WireGuard =="
+        wg show all latest-handshakes 2>/dev/null | while read -r iface peer ts; do
+            if [ "$ts" = "0" ]; then
+                echo "$iface: nessun handshake"
+            else
+                echo "$iface: ultimo handshake $(( (NOW - ts) / 60 )) minuti fa"
+            fi
+        done
+        echo
+    fi
+
+    if have apcaccess; then
+        echo "== UPS =="
+        apcaccess 2>&1 | grep -E '^(STATUS|LINEV|LOADPCT|BCHARGE|TIMELEFT|BATTDATE)'
+        echo
+    fi
+
+    if have sv; then
+        echo "== Servizi =="
+        for s in /var/service/*; do
+            [ -d "$s" ] && sv status "$s" 2>&1
+        done
+    fi
+}
+
+body() {
+    if [ -n "$PROBLEMS" ]; then
+        echo "PROBLEMI RILEVATI:"
+        printf '%s' "$PROBLEMS"
+    else
+        echo "Nessun problema rilevato."
+    fi
+    echo
+    details
+}
+
+send_mail() {
+    subject="$1"
+    {
+        printf 'To: %s\n' "$MAILTO"
+        printf 'Subject: %s\n' "$subject"
+        printf 'Content-Type: text/plain; charset=UTF-8\n'
+        printf '\n'
+        cat
+    } | sendmail -t
+}
+
+# ------------------------------------------------------------------------- main
+
+if [ "$(id -u)" -ne 0 ]; then
+    echo "borgreplay-check: va eseguito come root" >&2
+    exit 2
+fi
+
+TMP="$(mktemp -d)" || exit 2
+trap 'rm -rf "$TMP"' EXIT
+
+check_zfs
+check_smart
+check_temps
+check_sync
+check_root
+check_wg
+check_fans
+check_services
+check_ups
+
+case "$MODE" in
+    --stdout)
+        body
+        ;;
+
+    --report)
+        if [ -n "$PROBLEMS" ]; then
+            body | send_mail "[$HOST] Rapporto: PROBLEMI"
+        else
+            body | send_mail "[$HOST] Rapporto: tutto OK"
+        fi
+        ;;
+
+    --boot)
+        {
+            echo "Il sistema e' stato avviato."
+            echo
+            body
+        } | send_mail "[$HOST] Sistema avviato"
+        ;;
+
+    check)
+        mkdir -p "$STATE_DIR"
+        if [ -n "$PROBLEMS" ]; then
+            printf '%s' "$PROBLEMS" > "$STATE_DIR/current"
+            # Stesso allarme gia' inviato di recente: non ripetere
+            if cmp -s "$STATE_DIR/current" "$STATE_DIR/last" &&
+               [ -n "$(find "$STATE_DIR/last" -mmin -"$REPEAT_MIN" 2>/dev/null)" ]; then
+                rm -f "$STATE_DIR/current"
+                exit 1
+            fi
+            mv "$STATE_DIR/current" "$STATE_DIR/last"
+            body | send_mail "[$HOST] ALLARME: problemi rilevati"
+        elif [ -e "$STATE_DIR/last" ]; then
+            rm -f "$STATE_DIR/last"
+            body | send_mail "[$HOST] Rientrato: tutto OK"
+        fi
+        ;;
+
+    *)
+        echo "Uso: borgreplay-check [--report|--boot|--stdout]" >&2
+        exit 2
+        ;;
+esac
+
+[ -z "$PROBLEMS" ]
+
