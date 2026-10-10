@@ -16,6 +16,7 @@ eventuali mail e torna a dormire fino alla notte successiva.
 | `sv/borgreplay-cycle/run`    | `/etc/sv/borgreplay-cycle/run`     | servizio runit che esegue il ciclo |
 | `cron.d/borgreplay-check`    | `/etc/cron.d/borgreplay-check`     | notifica di avvio a freddo (`@reboot`) |
 | `etc/borgreplay-cycle.conf`  | `/etc/borgreplay-cycle.conf`       | impostazioni locali (sovrascrive i default) |
+| `client/bck_sync_to_borgreplay` | `/usr/local/bin/` sull'host `borg` | replica rsync e scrittura del marker `.last_sync` |
 
 ## Funzionamento
 
@@ -31,7 +32,41 @@ A ogni risveglio (o avvio) `borgreplay-cycle`:
    nessuno scrub/resilver, nessun file `/etc/borgreplay-stay-awake`;
 6. sospende con `rtcwake -m mem -s <secondi>` fino alla prossima `WAKE_TIME`.
 
-Il file `.last_sync` viene aggiornato dal lato client (host `borg`) a fine replica.
+Il file `.last_sync` viene aggiornato dal lato client (host `borg`) a fine replica,
+vedi sotto.
+
+## Lato client: host `borg`
+
+| File nel progetto                | Installato su `borg` (Debian 13, 192.0.2.20) |
+|----------------------------------|--------------------------------------------------|
+| `client/bck_sync_to_borgreplay`  | `/usr/local/bin/bck_sync_to_borgreplay`          |
+
+Lo script:
+
+1. annota l'ora di inizio in UTC (`YYYYMMDD_HHMMSS`);
+2. copia `/mnt/backup/` in `backup@192.0.2.10:/backup/borgrepo` con
+   `rsync -aAXH --delete`, usando la chiave `~/.ssh/id_ed25519_borgreplay`
+   (in alternativa, via WireGuard: `192.0.2.30`);
+3. scrive l'ora di inizio in `/backup/borgrepo/.last_sync`. Su `borgreplay` e'
+   questo a far capire a `borgreplay-cycle` che la replica e' finita.
+
+Lo script parte alle 04:50: nei log di `borgreplay` le connessioni SSH da
+192.0.2.20 arrivano alle 04:50 (rsync) e alle 04:51 (marker). La riga di
+crontab che lo lancia non e' stata verificata, perche' il crontab di root su
+`borg` non e' leggibile senza sudo. Deve partire dopo `WAKE_TIME` (04:40) piu'
+`SETTLE` (30 s): se parte prima, `borgreplay` e' ancora sospesa e la replica
+fallisce.
+
+Sulla macchina `borgreplay` la chiave corrispondente e' in
+`~backup/.ssh/authorized_keys` (commento `root@borg`).
+
+**Attenzione:** lo script non controlla l'esito di `rsync`. Se la copia fallisce,
+il marker viene scritto comunque e `borgreplay-check` non segnala nulla. Una
+correzione minima e' scrivere il marker solo se rsync riesce:
+
+```sh
+rsync ... && ssh $KEY backup@$DEST "echo $START_DATETIME > /backup/borgrepo/.last_sync"
+```
 
 ### Mail inviate da `borgreplay-check`
 
@@ -64,6 +99,13 @@ cambiano direttamente nello script.
 
 ```sh
 sudo ./install.sh
+```
+
+`install.sh` installa solo la parte di `borgreplay`. Sul client va copiato a mano:
+
+```sh
+scp client/bck_sync_to_borgreplay admin@192.0.2.20:/tmp/
+ssh -t admin@192.0.2.20 'sudo install -m 755 /tmp/bck_sync_to_borgreplay /usr/local/bin/'
 ```
 
 Dipendenze: `util-linux` (rtcwake), `zfs`, `smartmontools`, `postfix`, `cronie`.

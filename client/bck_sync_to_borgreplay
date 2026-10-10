@@ -1,0 +1,13 @@
+#!/bin/bash
+
+DEST=192.0.2.10
+#DEST=192.0.2.30
+KEY='-i ~/.ssh/id_ed25519_borgreplay'
+START_DATETIME="$(date --u +%Y%m%d_%H%M%S)"
+
+
+rsync -aAXH --delete   -e "ssh $KEY"   /mnt/backup/   backup@$DEST:/backup/borgrepo
+#ssh $KEY backup@$DEST 'touch /backup/borgrepo/.last_sync'
+ssh $KEY backup@$DEST "echo $START_DATETIME > /backup/borgrepo/.last_sync"
+
+
