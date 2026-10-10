@@ -1,4 +1,6 @@
 #!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-only
+# Copyright (C) 2026 Antonio Salsi
 #
 # uninstall.sh - removes borgreplay-cycle and borgreplay-check
 #

@@ -1,4 +1,6 @@
 #!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-only
+# Copyright (C) 2026 Antonio Salsi
 #
 # build.sh - builds the borgreplay Void Linux package with xbps-create
 #
@@ -10,7 +12,7 @@
 set -e
 
 VERSION="1.0"
-REVISION="1"
+REVISION="2"
 PKGVER="borgreplay-${VERSION}_${REVISION}"
 
 TOP="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -35,6 +37,7 @@ install -Dm644 README_IT.md                  "$DOC/README_IT.md"
 install -Dm755 client/bck_sync_to_borgreplay "$DOC/client/bck_sync_to_borgreplay"
 install -Dm644 client/crontab-root           "$DOC/client/crontab-root"
 
+install -Dm644 LICENSE "$DESTDIR/usr/share/licenses/borgreplay/LICENSE"
 install -m644 packaging/void/INSTALL.msg "$DESTDIR/INSTALL.msg"
 
 mkdir -p "$DIST"
@@ -49,7 +52,7 @@ through the RTC to receive the replica, runs health checks with mail
 notification and suspends it again." \
     -D "util-linux>=0 procps-ng>=0 zfs>=0 smartmontools>=0 postfix>=0 cronie>=0" \
     -F "/etc/borgreplay-cycle.conf /etc/borgreplay.env" \
-    -l "custom:unspecified" \
+    -l "GPL-2.0-only" \
     "$DESTDIR"
 xbps-rindex -a "$DIST/$PKGVER.noarch.xbps"
 

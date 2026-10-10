@@ -181,3 +181,7 @@ sudo ./uninstall.sh
   non viene eseguito: lo scrub e' gia' gestito da `borgreplay-cycle`.
 - Se manca la corrente mentre la macchina e' sospesa, al ritorno riparte da
   zero e il cron `@reboot` manda la mail "System booted".
+
+## Licenza
+
+GPL-2.0-only, vedi [LICENSE](LICENSE).

@@ -181,3 +181,7 @@ sudo ./uninstall.sh
   those times it never runs: the scrub is already handled by `borgreplay-cycle`.
 - If power is lost while the machine is suspended, it boots from scratch when
   power returns and the `@reboot` cron job sends the "System booted" mail.
+
+## License
+
+GPL-2.0-only, see [LICENSE](LICENSE).

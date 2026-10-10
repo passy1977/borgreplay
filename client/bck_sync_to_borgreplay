@@ -1,4 +1,6 @@
 #!/bin/bash
+# SPDX-License-Identifier: GPL-2.0-only
+# Copyright (C) 2026 Antonio Salsi
 #
 # bck_sync_to_borgreplay - copies the Borg repositories to borgreplay and
 # writes the .last_sync marker
