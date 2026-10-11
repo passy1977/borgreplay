@@ -6,10 +6,10 @@
 # writes the .last_sync marker
 #
 # REPLICA_HOST, REPLICA_USER, SSH_KEY, STAY_AWAKE_REQUEST, MAILTO, SMTP_RELAY
-# and MAILFROM are read from /etc/borgreplay.env
+# and MAILFROM are read from /etc/borgreplay/borgreplay.env
 #
 # Usage: bck_sync_to_borgreplay [--stay-awake]
-#   --stay-awake   asks borgreplay to create /etc/borgreplay-stay-awake once
+#   --stay-awake   asks borgreplay to create /etc/borgreplay/stay-awake once
 #                  the replica is done, so it does not suspend until the file
 #                  is removed by hand (e.g. after a remote login)
 #
@@ -26,8 +26,8 @@ case "$1" in
     "") ;;
     *)  echo "usage: bck_sync_to_borgreplay [--stay-awake]" >&2; exit 2 ;;
 esac
-STAY_AWAKE_REQUEST=/etc/borgreplay-stay-awake.request
-[ -r /etc/borgreplay.env ] && . /etc/borgreplay.env
+STAY_AWAKE_REQUEST=/etc/borgreplay/stay-awake.request
+[ -r /etc/borgreplay/borgreplay.env ] && . /etc/borgreplay/borgreplay.env
 [ -e "$STAY_AWAKE_REQUEST" ] && STAY_AWAKE=" stay-awake"
 MAILFROM="${MAILFROM:-root@$(hostname -f)}"
 
@@ -56,8 +56,8 @@ with smtplib.SMTP(os.environ["SMTP_RELAY"], timeout=60) as s:  # host or host:po
 }
 
 if [ -z "$REPLICA_HOST" ] || [ -z "$REPLICA_USER" ]; then
-    logger -t bck_sync_to_borgreplay "REPLICA_HOST or REPLICA_USER not set in /etc/borgreplay.env"
-    echo "bck_sync_to_borgreplay: REPLICA_HOST or REPLICA_USER not set in /etc/borgreplay.env" >&2
+    logger -t bck_sync_to_borgreplay "REPLICA_HOST or REPLICA_USER not set in /etc/borgreplay/borgreplay.env"
+    echo "bck_sync_to_borgreplay: REPLICA_HOST or REPLICA_USER not set in /etc/borgreplay/borgreplay.env" >&2
     exit 2
 fi
 

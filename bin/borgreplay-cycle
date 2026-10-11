@@ -11,12 +11,12 @@
 #   4. waits for the machine to be idle (no logged-in users, no rsync)
 #   5. suspends to RAM until the next wake-up
 #
-# To keep it awake:        touch /etc/borgreplay-stay-awake
-# To let it sleep again:   rm /etc/borgreplay-stay-awake
+# To keep it awake:        touch /etc/borgreplay/stay-awake
+# To let it sleep again:   rm /etc/borgreplay/stay-awake
 # The file is also created when the marker written by the client contains
 # "stay-awake" (bck_sync_to_borgreplay --stay-awake)
 #
-# Settings can be overridden in /etc/borgreplay-cycle.conf
+# Settings can be overridden in /etc/borgreplay/cycle.conf
 
 # ---------------------------------------------------------------- configuration
 
@@ -26,12 +26,12 @@ SYNC_MARKER="/backup/borgrepo/.last_sync"   # file touched by borg when the repl
 SYNC_WAIT_MIN=180                           # maximum wait for the replica (minutes)
 SCRUB_EVERY_DAYS=30                         # interval between two scrubs
 REPORT_DOW=1                                # day of the full report (1 = Monday)
-STAY_AWAKE="/etc/borgreplay-stay-awake"     # if present, no suspend
+STAY_AWAKE="/etc/borgreplay/stay-awake"     # if present, no suspend
 CHECK="borgreplay-check"                    # looked up in PATH
 POLL=60                                     # polling interval (seconds)
 SETTLE=30                                   # wait after wake-up (network, tunnel)
 
-[ -r /etc/borgreplay-cycle.conf ] && . /etc/borgreplay-cycle.conf
+[ -r /etc/borgreplay/cycle.conf ] && . /etc/borgreplay/cycle.conf
 
 # ------------------------------------------------------------------------------
 

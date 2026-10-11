@@ -15,7 +15,7 @@
 
 # ---------------------------------------------------------------- configuration
 
-MAILTO="root"                               # overridden by /etc/borgreplay.env
+MAILTO="root"                               # overridden by /etc/borgreplay/borgreplay.env
 
 POOL="backup"                               # ZFS pool to check
 POOL_MAX_PCT=80                             # maximum pool usage %
@@ -36,7 +36,7 @@ WG_MAX_SEC=600                              # maximum age of the WireGuard hands
 STATE_DIR="/var/lib/borgreplay-check"       # state to avoid repeating the same mail
 REPEAT_MIN=1380                             # repeat an unchanged alarm after 23 hours
 
-[ -r /etc/borgreplay.env ] && . /etc/borgreplay.env
+[ -r /etc/borgreplay/borgreplay.env ] && . /etc/borgreplay/borgreplay.env
 
 # ------------------------------------------------------------------------------
 

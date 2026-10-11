@@ -7,7 +7,7 @@
 # Usage (as a normal user, from this directory):   ./install-client.sh
 #
 # Copies client/bck_sync_to_borgreplay to /usr/local/bin and .env to
-# /etc/borgreplay.env on $CLIENT_USER@$CLIENT_HOST (asks for the sudo password
+# /etc/borgreplay/borgreplay.env on $CLIENT_USER@$CLIENT_HOST (asks for the sudo password
 # there). The crontab line in client/crontab-root is added by hand.
 
 set -e
@@ -28,8 +28,13 @@ fi
 TARGET="$CLIENT_USER@$CLIENT_HOST"
 
 scp client/bck_sync_to_borgreplay .env "$TARGET:/tmp/"
+# Files of the versions before /etc/borgreplay/ are removed or moved there
 ssh -t "$TARGET" 'sudo install -m 755 /tmp/bck_sync_to_borgreplay /usr/local/bin/bck_sync_to_borgreplay &&
-    sudo install -m 644 /tmp/.env /etc/borgreplay.env &&
+    sudo install -d -m 755 /etc/borgreplay &&
+    sudo install -m 644 /tmp/.env /etc/borgreplay/borgreplay.env &&
+    sudo rm -f /etc/borgreplay.env &&
+    { [ ! -e /etc/borgreplay-stay-awake.request ] ||
+      sudo mv /etc/borgreplay-stay-awake.request /etc/borgreplay/stay-awake.request; } &&
     rm -f /tmp/bck_sync_to_borgreplay /tmp/.env'
 
 echo "client installed on $CLIENT_HOST"

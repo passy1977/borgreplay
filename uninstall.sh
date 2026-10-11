@@ -6,7 +6,7 @@
 #
 # Usage (as root):   ./uninstall.sh
 #
-# Leaves /etc/borgreplay.env, /etc/borgreplay-cycle.conf and the state in /var/lib/borgreplay-check in place.
+# Leaves /etc/borgreplay/borgreplay.env, /etc/borgreplay/cycle.conf and the state in /var/lib/borgreplay-check in place.
 
 set -e
 

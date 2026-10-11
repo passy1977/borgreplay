@@ -7,7 +7,7 @@
 # Usage (as root):   ./install.sh
 #
 # Site settings are taken from .env (see .env.sample) and installed as
-# /etc/borgreplay.env. An existing /etc/borgreplay-cycle.conf is not overwritten.
+# /etc/borgreplay/borgreplay.env. An existing /etc/borgreplay/cycle.conf is not overwritten.
 
 set -e
 
@@ -23,7 +23,16 @@ if [ ! -r .env ]; then
     exit 2
 fi
 
-install -m 644 .env /etc/borgreplay.env
+install -d -m 755 /etc/borgreplay
+
+# Files of the versions before /etc/borgreplay/: the old site settings are
+# replaced by .env, the cycle settings and the stay-awake flag are moved
+rm -f /etc/borgreplay.env
+[ -e /etc/borgreplay-cycle.conf ] && [ ! -e /etc/borgreplay/cycle.conf ] &&
+    mv /etc/borgreplay-cycle.conf /etc/borgreplay/cycle.conf
+[ -e /etc/borgreplay-stay-awake ] && mv /etc/borgreplay-stay-awake /etc/borgreplay/stay-awake
+
+install -m 644 .env /etc/borgreplay/borgreplay.env
 
 install -m 755 bin/borgreplay-cycle /usr/local/bin/borgreplay-cycle
 install -m 755 bin/borgreplay-check /usr/local/bin/borgreplay-check
@@ -33,10 +42,10 @@ install -m 755 sv/borgreplay-cycle/run /etc/sv/borgreplay-cycle/run
 
 install -m 644 cron.d/borgreplay-check /etc/cron.d/borgreplay-check
 
-if [ ! -e /etc/borgreplay-cycle.conf ]; then
-    install -m 644 etc/borgreplay-cycle.conf /etc/borgreplay-cycle.conf
+if [ ! -e /etc/borgreplay/cycle.conf ]; then
+    install -m 644 etc/cycle.conf /etc/borgreplay/cycle.conf
 else
-    echo "leaving /etc/borgreplay-cycle.conf unchanged"
+    echo "leaving /etc/borgreplay/cycle.conf unchanged"
 fi
 
 if [ ! -e /var/service/borgreplay-cycle ]; then
