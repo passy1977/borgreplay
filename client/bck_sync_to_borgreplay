@@ -5,8 +5,8 @@
 # bck_sync_to_borgreplay - copies the Borg repositories to borgreplay and
 # writes the .last_sync marker
 #
-# REPLICA_HOST, REPLICA_USER, SSH_KEY and STAY_AWAKE_REQUEST are read from
-# /etc/borgreplay.env
+# REPLICA_HOST, REPLICA_USER, SSH_KEY, STAY_AWAKE_REQUEST, MAILTO, SMTP_RELAY
+# and MAILFROM are read from /etc/borgreplay.env
 #
 # Usage: bck_sync_to_borgreplay [--stay-awake]
 #   --stay-awake   asks borgreplay to create /etc/borgreplay-stay-awake once
@@ -15,6 +15,9 @@
 #
 # The same request is made by the nightly cron run when $STAY_AWAKE_REQUEST
 # exists; the file is deleted once the request has been delivered.
+#
+# If the replica fails a mail is sent to $MAILTO through $SMTP_RELAY (python3,
+# no local MTA needed): it usually means borgreplay did not wake up.
 
 SSH_KEY=~/.ssh/id_ed25519_borgreplay
 STAY_AWAKE=""
@@ -26,6 +29,31 @@ esac
 STAY_AWAKE_REQUEST=/etc/borgreplay-stay-awake.request
 [ -r /etc/borgreplay.env ] && . /etc/borgreplay.env
 [ -e "$STAY_AWAKE_REQUEST" ] && STAY_AWAKE=" stay-awake"
+MAILFROM="${MAILFROM:-root@$(hostname -f)}"
+
+# Sends a mail through $SMTP_RELAY with subject $1 and the body on stdin;
+# does nothing if MAILTO or SMTP_RELAY are not set
+notify() {
+    if [ -z "$MAILTO" ] || [ -z "$SMTP_RELAY" ]; then
+        cat >/dev/null
+        return 0
+    fi
+    MAILTO="$MAILTO" MAILFROM="$MAILFROM" SMTP_RELAY="$SMTP_RELAY" \
+    SUBJECT="[$(hostname)] $1" python3 -c '
+import os, smtplib, sys
+from email.message import EmailMessage
+from email.utils import formatdate, make_msgid
+m = EmailMessage()
+m["From"] = os.environ["MAILFROM"]
+m["To"] = os.environ["MAILTO"]
+m["Subject"] = os.environ["SUBJECT"]
+m["Date"] = formatdate(localtime=True)
+m["Message-ID"] = make_msgid(domain=os.environ["MAILFROM"].split("@")[-1])
+m.set_content(sys.stdin.read())
+with smtplib.SMTP(os.environ["SMTP_RELAY"], timeout=60) as s:  # host or host:port
+    s.send_message(m)
+' || logger -t bck_sync_to_borgreplay "mail to $MAILTO through $SMTP_RELAY failed"
+}
 
 if [ -z "$REPLICA_HOST" ] || [ -z "$REPLICA_USER" ]; then
     logger -t bck_sync_to_borgreplay "REPLICA_HOST or REPLICA_USER not set in /etc/borgreplay.env"
@@ -36,14 +64,25 @@ fi
 DEST="$REPLICA_USER@$REPLICA_HOST"
 KEY="-i $SSH_KEY"
 START_DATETIME="$(date --u +%Y%m%d_%H%M%S)"
+ERR="$(mktemp)"
+trap 'rm -f "$ERR"' EXIT
 
 
-rsync -aAXH --delete   -e "ssh $KEY"   /mnt/backup/   $DEST:/backup/borgrepo
+rsync -aAXH --delete   -e "ssh $KEY"   /mnt/backup/   $DEST:/backup/borgrepo 2>"$ERR"
 RC=$?
+cat "$ERR" >&2
 # Write the marker only if the copy is complete: borgreplay-check reports
 # the missing replica when the marker gets old
 if [ $RC -ne 0 ]; then
     logger -t bck_sync_to_borgreplay "rsync failed (code $RC), marker not updated"
+    {
+        echo "The replica to $REPLICA_HOST failed: rsync exited with code $RC."
+        echo "The marker was not updated. If borgreplay did not wake up at its"
+        echo "WAKE_TIME it is probably still suspended and needs a manual power on."
+        echo
+        echo "Last rsync messages:"
+        tail -n 20 "$ERR"
+    } | notify "Replica FAILED (rsync code $RC)"
     exit $RC
 fi
 # The second word of the marker, if present, is a request for borgreplay-cycle
@@ -51,6 +90,8 @@ ssh $KEY $DEST "echo $START_DATETIME$STAY_AWAKE > /backup/borgrepo/.last_sync"
 RC=$?
 if [ $RC -ne 0 ]; then
     logger -t bck_sync_to_borgreplay "marker write failed (code $RC)"
+    echo "The data was copied to $REPLICA_HOST, but writing the marker failed (ssh code $RC)." |
+        notify "Replica marker FAILED (ssh code $RC)"
     exit $RC
 fi
 if [ -n "$STAY_AWAKE" ]; then

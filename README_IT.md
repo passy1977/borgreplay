@@ -76,6 +76,12 @@ lo script scrive il codice d'errore nel syslog dell'host Borg (tag
 attende fino a `SYNC_WAIT_MIN` minuti prima di sospendere, e `borgreplay-check`
 manda l'allarme quando il marker supera `SYNC_MAX_DAYS` (2 giorni).
 
+Se la replica fallisce parte subito anche una mail dall'host Borg (oggetto
+`[borg] Replica FAILED (rsync code N)`, con gli ultimi messaggi di rsync): se
+`borgreplay` non si e' svegliata non puo' segnalarlo da sola. La mail va a
+`MAILTO` attraverso `SMTP_RELAY` usando `python3`, quindi sull'host Borg non
+serve un server di posta; il relay deve accettare posta da quell'host.
+
 ## Stay-awake remoto
 
 `borgreplay` e' raggiungibile solo nei pochi minuti della replica notturna. Per
@@ -163,6 +169,8 @@ cp .env.sample .env
 | `REPLICA_USER` | `bck_sync_to_borgreplay`   | utente proprietario di `/backup/borgrepo` su `borgreplay` |
 | `SSH_KEY`      | `bck_sync_to_borgreplay`   | chiave SSH di root sull'host Borg (facoltativa) |
 | `STAY_AWAKE_REQUEST` | `bck_sync_to_borgreplay` | file di richiesta per lo [stay-awake remoto](#stay-awake-remoto) (facoltativa) |
+| `SMTP_RELAY`   | `bck_sync_to_borgreplay`   | relay SMTP (`host` o `host:porta`) per la mail di replica fallita; vuota = nessuna mail |
+| `MAILFROM`     | `bck_sync_to_borgreplay`   | mittente di quella mail (facoltativa, predefinito `root@<fqdn>`) |
 | `CLIENT_HOST`, `CLIENT_USER` | `install-client.sh` | dove installare il lato client |
 
 Le variabili all'inizio di `borgreplay-cycle` si possono sovrascrivere in
