@@ -12,7 +12,7 @@
 set -e
 
 VERSION="1.2"
-REVISION="1"
+REVISION="2"
 PKGVER="borgreplay-${VERSION}_${REVISION}"
 
 TOP="$(cd "$(dirname "$0")/../.." && pwd)"

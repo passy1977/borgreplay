@@ -50,10 +50,17 @@ vedi sotto.
 
 Lo script, lanciato da root:
 
-1. annota l'ora di inizio in UTC (`YYYYMMDD_HHMMSS`);
-2. copia `/mnt/backup/` in `$REPLICA_USER@$REPLICA_HOST:/backup/borgrepo` con
-   `rsync -aAXH --delete`, usando la chiave `$SSH_KEY`
-   (predefinita `/root/.ssh/id_ed25519_borgreplay`);
+1. aspetta che nessun repository sia bloccato da un backup Borg in corso
+   (`lock.exclusive` o `lock.roster`), al massimo `LOCK_WAIT_MIN` (120) minuti:
+   altrimenti i backup che si sovrappongono all'orario della replica
+   cambierebbero i file durante la copia;
+2. annota l'ora di inizio in UTC (`YYYYMMDD_HHMMSS`) e copia `/mnt/backup/` in
+   `$REPLICA_USER@$REPLICA_HOST:/backup/borgrepo` con `rsync -aAXH --delete`,
+   usando la chiave `$SSH_KEY` (predefinita `/root/.ssh/id_ed25519_borgreplay`);
+   se un backup parte durante la copia (codice 24 di rsync, file spariti)
+   aspetta di nuovo e ripete la copia, al massimo `COPY_TRIES` (3) volte. Il
+   marker e' escluso da `--delete`, quindi una copia fallita lascia quello
+   precedente;
 3. scrive l'ora di inizio in `/backup/borgrepo/.last_sync`. Su `borgreplay` e'
    questo a far capire a `borgreplay-cycle` che la replica e' finita.
 

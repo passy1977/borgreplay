@@ -17,9 +17,16 @@
 # exists; the file is deleted once the request has been delivered.
 #
 # If the replica fails a mail is sent to $MAILTO through $SMTP_RELAY (python3,
-# no local MTA needed): it usually means borgreplay did not wake up.
+# no local MTA needed).
+#
+# The copy starts only when no repository is locked by a running Borg backup
+# (lock.exclusive / lock.roster), waiting at most LOCK_WAIT_MIN minutes, and is
+# repeated (at most COPY_TRIES times) if a backup starts during it.
 
 SSH_KEY=~/.ssh/id_ed25519_borgreplay
+SRC=/mnt/backup
+LOCK_WAIT_MIN=120                           # maximum wait for running Borg backups
+COPY_TRIES=3                                # copies attempted if files vanish
 STAY_AWAKE=""
 case "$1" in
     --stay-awake) STAY_AWAKE=" stay-awake" ;;
@@ -29,7 +36,7 @@ esac
 STAY_AWAKE_REQUEST=/etc/borgreplay/stay-awake.request
 [ -r /etc/borgreplay/borgreplay.env ] && . /etc/borgreplay/borgreplay.env
 [ -e "$STAY_AWAKE_REQUEST" ] && STAY_AWAKE=" stay-awake"
-MAILFROM="${MAILFROM:-root@$(hostname -f)}"
+MAILFROM="${MAILFROM:-root@$(hostname -f 2>/dev/null || hostname)}"
 
 # Sends a mail through $SMTP_RELAY with subject $1 and the body on stdin;
 # does nothing if MAILTO or SMTP_RELAY are not set
@@ -63,22 +70,66 @@ fi
 
 DEST="$REPLICA_USER@$REPLICA_HOST"
 KEY="-i $SSH_KEY"
-START_DATETIME="$(date --u +%Y%m%d_%H%M%S)"
 ERR="$(mktemp)"
 trap 'rm -f "$ERR"' EXIT
 
+# Prints the repositories locked by a running Borg backup; empty = none
+locked_repos() {
+    for r in "$SRC"/*/; do
+        if [ -e "${r}lock.exclusive" ] || [ -e "${r}lock.roster" ]; then
+            basename "$r"
+        fi
+    done
+}
 
-rsync -aAXH --delete   -e "ssh $KEY"   /mnt/backup/   $DEST:/backup/borgrepo 2>"$ERR"
-RC=$?
-cat "$ERR" >&2
+# Waits until no repository is locked, at most LOCK_WAIT_MIN minutes
+wait_unlocked() {
+    deadline=$(( $(date +%s) + LOCK_WAIT_MIN * 60 ))
+    logged=""
+    while :; do
+        locked="$(locked_repos)"
+        [ -z "$locked" ] && return 0
+        [ "$(date +%s)" -ge "$deadline" ] && return 1
+        if [ -z "$logged" ]; then
+            logger -t bck_sync_to_borgreplay "waiting for Borg backups: $(echo $locked)"
+            logged=1
+        fi
+        sleep 30
+    done
+}
+
+try=1
+while :; do
+    if ! wait_unlocked; then
+        logger -t bck_sync_to_borgreplay "repositories still locked after $LOCK_WAIT_MIN minutes, replica skipped"
+        echo "The replica to $REPLICA_HOST was skipped: after $LOCK_WAIT_MIN minutes these repositories were still locked by Borg: $(echo $(locked_repos)). The marker was not updated." |
+            notify "Replica SKIPPED (Borg backup still running)"
+        exit 3
+    fi
+    START_DATETIME="$(date --u +%Y%m%d_%H%M%S)"
+    # The marker is excluded so that --delete does not remove it: after a failed
+    # copy borgreplay keeps the previous one and reports its age
+    rsync -aAXH --delete --exclude=/.last_sync -e "ssh $KEY" "$SRC/" $DEST:/backup/borgrepo 2>"$ERR"
+    RC=$?
+    cat "$ERR" >&2
+    # 24: files vanished, a Borg backup started during the copy: wait and copy again
+    [ $RC -eq 24 ] && [ $try -lt $COPY_TRIES ] || break
+    logger -t bck_sync_to_borgreplay "files vanished during copy $try, retrying"
+    try=$(( try + 1 ))
+done
+
 # Write the marker only if the copy is complete: borgreplay-check reports
 # the missing replica when the marker gets old
 if [ $RC -ne 0 ]; then
     logger -t bck_sync_to_borgreplay "rsync failed (code $RC), marker not updated"
     {
-        echo "The replica to $REPLICA_HOST failed: rsync exited with code $RC."
-        echo "The marker was not updated. If borgreplay did not wake up at its"
-        echo "WAKE_TIME it is probably still suspended and needs a manual power on."
+        echo "The replica to $REPLICA_HOST failed: rsync exited with code $RC after $try attempt(s)."
+        echo "The marker was not updated."
+        case $RC in
+            24) echo "Borg backups kept changing the repositories during every copy." ;;
+            255) echo "borgreplay is not reachable: if it did not wake up at its WAKE_TIME"
+                 echo "it is probably still suspended and needs a manual power on." ;;
+        esac
         echo
         echo "Last rsync messages:"
         tail -n 20 "$ERR"

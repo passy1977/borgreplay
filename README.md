@@ -50,10 +50,17 @@ replica ends, see below.
 
 The script, run as root:
 
-1. records the start time in UTC (`YYYYMMDD_HHMMSS`);
-2. copies `/mnt/backup/` to `$REPLICA_USER@$REPLICA_HOST:/backup/borgrepo` with
+1. waits until no repository is locked by a running Borg backup
+   (`lock.exclusive` or `lock.roster`), at most `LOCK_WAIT_MIN` (120) minutes:
+   backups that overlap the replica time would otherwise change files during
+   the copy;
+2. records the start time in UTC (`YYYYMMDD_HHMMSS`) and copies `/mnt/backup/`
+   to `$REPLICA_USER@$REPLICA_HOST:/backup/borgrepo` with
    `rsync -aAXH --delete`, using the key `$SSH_KEY`
-   (default `/root/.ssh/id_ed25519_borgreplay`);
+   (default `/root/.ssh/id_ed25519_borgreplay`); if a backup starts during the
+   copy (rsync code 24, files vanished) it waits again and repeats the copy, at
+   most `COPY_TRIES` (3) times. The marker is excluded from `--delete`, so a
+   failed copy leaves the previous one in place;
 3. writes the start time to `/backup/borgrepo/.last_sync`. On `borgreplay` this
    is what tells `borgreplay-cycle` that the replica is done.
 
