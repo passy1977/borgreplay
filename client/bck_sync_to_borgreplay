@@ -125,11 +125,15 @@ if [ $RC -ne 0 ]; then
     {
         echo "The replica to $REPLICA_HOST failed: rsync exited with code $RC after $try attempt(s)."
         echo "The marker was not updated."
-        case $RC in
-            24) echo "Borg backups kept changing the repositories during every copy." ;;
-            255) echo "borgreplay is not reachable: if it did not wake up at its WAKE_TIME"
-                 echo "it is probably still suspended and needs a manual power on." ;;
-        esac
+        # ssh failures reach rsync as 255 or, depending on the rsync version, as 12
+        if [ $RC -eq 255 ] ||
+           grep -qE '^ssh: |Host key verification failed' "$ERR"; then
+            echo "borgreplay is not reachable at $REPLICA_HOST: if it did not wake up at"
+            echo "its WAKE_TIME it is probably still suspended and needs a manual power on;"
+            echo "otherwise check that REPLICA_HOST still matches its address."
+        elif [ $RC -eq 24 ]; then
+            echo "Borg backups kept changing the repositories during every copy."
+        fi
         echo
         echo "Last rsync messages:"
         tail -n 20 "$ERR"

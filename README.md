@@ -170,7 +170,7 @@ cp .env.sample .env
 | Variable       | Used by                    | Meaning |
 |----------------|----------------------------|---------|
 | `MAILTO`       | `borgreplay-check`         | mail recipient |
-| `REPLICA_HOST` | `bck_sync_to_borgreplay`   | address of `borgreplay` as reached from the Borg host |
+| `REPLICA_HOST` | `bck_sync_to_borgreplay`   | address of `borgreplay` as reached from the Borg host: a DNS name or a reserved IP, since a DHCP address can change after a suspend; root on the Borg host must know its host key under this name |
 | `REPLICA_USER` | `bck_sync_to_borgreplay`   | user owning `/backup/borgrepo` on `borgreplay` |
 | `SSH_KEY`      | `bck_sync_to_borgreplay`   | SSH key of root on the Borg host (optional) |
 | `STAY_AWAKE_REQUEST` | `bck_sync_to_borgreplay` | request file for the [remote stay-awake](#remote-stay-awake) (optional) |
