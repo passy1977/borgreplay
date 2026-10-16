@@ -26,7 +26,7 @@ eventuali mail e torna a dormire fino alla notte successiva.
 A ogni risveglio (o avvio) `borgreplay-cycle`:
 
 1. aspetta che borg completi la replica, cioe' che `/backup/borgrepo/.last_sync`
-   diventi piu' recente del risveglio (massimo `SYNC_WAIT_MIN` = 180 minuti);
+   diventi piu' recente del risveglio (massimo `SYNC_WAIT_MIN` = 360 minuti);
    se il marker contiene una richiesta `stay-awake`, crea
    `/etc/borgreplay/stay-awake` (vedi [Stay-awake remoto](#stay-awake-remoto));
 2. se l'ultimo scrub del pool ha piu' di `SCRUB_EVERY_DAYS` (30) giorni lo avvia

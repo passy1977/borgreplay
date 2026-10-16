@@ -26,7 +26,7 @@ any mail and goes back to sleep until the next night.
 On every wake-up (or boot) `borgreplay-cycle`:
 
 1. waits for borg to complete the replica, i.e. for `/backup/borgrepo/.last_sync`
-   to become newer than the wake-up (at most `SYNC_WAIT_MIN` = 180 minutes);
+   to become newer than the wake-up (at most `SYNC_WAIT_MIN` = 360 minutes);
    if the marker carries a `stay-awake` request, creates
    `/etc/borgreplay/stay-awake` (see [Remote stay-awake](#remote-stay-awake));
 2. if the last pool scrub is older than `SCRUB_EVERY_DAYS` (30) days, starts one
